@@ -7,9 +7,14 @@ namespace ProjectIndexerMcp.Configuration;
 public sealed class ServerOptions
 {
     /// <summary>
-    /// Absolute path to the repository root that should be indexed.
+    /// Root directory where remote repositories are cloned and indexed.
     /// </summary>
-    public string ProjectRoot { get; set; } = string.Empty;
+    public string WorkingDirectory { get; set; } = Path.Combine(AppContext.BaseDirectory, "repositories");
+
+    /// <summary>
+    /// Repositories that can be mirrored and indexed by this server.
+    /// </summary>
+    public RepositoryDescriptor[] Repositories { get; set; } = Array.Empty<RepositoryDescriptor>();
 
     /// <summary>
     /// API key that clients must present via the Authorization header (Bearer scheme).
@@ -85,6 +90,14 @@ public sealed class ServerOptions
         ".cache",
         ".nuget"
     };
+
+
+    public sealed class RepositoryDescriptor
+    {
+        public string Name { get; set; } = string.Empty;
+        public string RemoteUrl { get; set; } = string.Empty;
+        public string DefaultBranch { get; set; } = "main";
+    }
 
     /// <summary>
     /// Combines folder, file, extension, and glob-based exclusions into glob patterns understood by the ignore matcher.
