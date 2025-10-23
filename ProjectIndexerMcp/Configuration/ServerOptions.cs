@@ -17,11 +17,6 @@ public sealed class ServerOptions
     public string? ApiKey { get; set; }
 
     /// <summary>
-    /// Optional list of allowed origin substrings for HTTP clients.
-    /// </summary>
-    public string[] AllowedOrigins { get; set; } = Array.Empty<string>();
-
-    /// <summary>
     /// Optional name advertised over mDNS when LAN discovery is enabled.
     /// </summary>
     public string MdnsServiceName { get; set; } = "ProjectIndexerMcp";
@@ -98,7 +93,7 @@ public sealed class ServerOptions
     {
         var patterns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var folder in ExcludeFolders)
+        foreach (var folder in ExcludeFolders ?? Array.Empty<string>())
         {
             var normalized = NormalizeFolderGlob(folder);
             if (!string.IsNullOrEmpty(normalized))
@@ -107,7 +102,7 @@ public sealed class ServerOptions
             }
         }
 
-        foreach (var fileName in ExcludeFileNames)
+        foreach (var fileName in ExcludeFileNames ?? Array.Empty<string>())
         {
             var normalized = NormalizeFileGlob(fileName);
             if (!string.IsNullOrEmpty(normalized))
@@ -116,7 +111,7 @@ public sealed class ServerOptions
             }
         }
 
-        foreach (var extension in ExcludeExtensions)
+        foreach (var extension in ExcludeExtensions ?? Array.Empty<string>())
         {
             var normalized = NormalizeExtensionGlob(extension);
             if (!string.IsNullOrEmpty(normalized))
