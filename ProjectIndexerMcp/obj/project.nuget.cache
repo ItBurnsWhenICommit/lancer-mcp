@@ -1,8 +1,21 @@
 {
   "version": 2,
-  "dgSpecHash": "zuEYSCj+aoc=",
+  "dgSpecHash": "jrveZd/Sozo=",
   "success": true,
   "projectFilePath": "/home/alex/Documents/repos/project-indexer-mcp/ProjectIndexerMcp/ProjectIndexerMcp.csproj",
-  "expectedPackageFiles": [],
+  "expectedPackageFiles": [
+    "/home/alex/.nuget/packages/microsoft.extensions.ai.abstractions/9.10.0/microsoft.extensions.ai.abstractions.9.10.0.nupkg.sha512",
+    "/home/alex/.nuget/packages/microsoft.extensions.configuration.abstractions/9.0.10/microsoft.extensions.configuration.abstractions.9.0.10.nupkg.sha512",
+    "/home/alex/.nuget/packages/microsoft.extensions.dependencyinjection.abstractions/9.0.10/microsoft.extensions.dependencyinjection.abstractions.9.0.10.nupkg.sha512",
+    "/home/alex/.nuget/packages/microsoft.extensions.diagnostics.abstractions/9.0.10/microsoft.extensions.diagnostics.abstractions.9.0.10.nupkg.sha512",
+    "/home/alex/.nuget/packages/microsoft.extensions.fileproviders.abstractions/9.0.10/microsoft.extensions.fileproviders.abstractions.9.0.10.nupkg.sha512",
+    "/home/alex/.nuget/packages/microsoft.extensions.hosting.abstractions/9.0.10/microsoft.extensions.hosting.abstractions.9.0.10.nupkg.sha512",
+    "/home/alex/.nuget/packages/microsoft.extensions.logging.abstractions/9.0.10/microsoft.extensions.logging.abstractions.9.0.10.nupkg.sha512",
+    "/home/alex/.nuget/packages/microsoft.extensions.options/9.0.10/microsoft.extensions.options.9.0.10.nupkg.sha512",
+    "/home/alex/.nuget/packages/microsoft.extensions.primitives/9.0.10/microsoft.extensions.primitives.9.0.10.nupkg.sha512",
+    "/home/alex/.nuget/packages/modelcontextprotocol/0.4.0-preview.3/modelcontextprotocol.0.4.0-preview.3.nupkg.sha512",
+    "/home/alex/.nuget/packages/modelcontextprotocol.core/0.4.0-preview.3/modelcontextprotocol.core.0.4.0-preview.3.nupkg.sha512",
+    "/home/alex/.nuget/packages/system.net.serversentevents/10.0.0-rc.2.25502.107/system.net.serversentevents.10.0.0-rc.2.25502.107.nupkg.sha512"
+  ],
   "logs": []
 }

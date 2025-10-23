@@ -44,6 +44,12 @@
       "frameworks": {
         "net9.0": {
           "targetAlias": "net9.0",
+          "dependencies": {
+            "ModelContextProtocol": {
+              "target": "Package",
+              "version": "[0.4.0-preview.3, )"
+            }
+          },
           "imports": [
             "net461",
             "net462",
