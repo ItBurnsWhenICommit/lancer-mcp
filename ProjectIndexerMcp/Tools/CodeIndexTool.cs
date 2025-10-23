@@ -27,7 +27,7 @@ public sealed class CodeIndexTool
     /// </summary>
     [McpServerTool]
     [Description("Query the code index. Supports natural language queries for code search, symbol lookup, finding references, call graphs, and code navigation. The server interprets your intent and returns relevant results.")]
-    public Task<string> Query(
+    public async Task<string> Query(
         [Description("Natural language query describing what you're looking for. Examples: 'find all classes that implement IRepository', 'show me the definition of UserService', 'what calls the Login method?', 'find recent changes in authentication code'")]
         string query,
         [Description("Specific repository name to search in. Must match one of the configured repository names.")]
@@ -42,6 +42,36 @@ public sealed class CodeIndexTool
         {
             _logger.LogInformation("Processing query: {Query} (repo: {Repo}, branch: {Branch})", query, repository, branch ?? "default");
 
+            // Get repository state
+            var repos = _gitTracker.GetRepositories();
+
+            if (!repos.TryGetValue(repository, out var repoState))
+            {
+                return JsonSerializer.Serialize(new
+                {
+                    error = $"Repository '{repository}' not found",
+                    availableRepositories = repos.Keys.ToArray()
+                });
+            }
+
+            // Determine which branch to query
+            var targetBranch = branch ?? repoState.DefaultBranch;
+
+            // PHASE 1: Lazy on-demand branch tracking
+            // If the branch isn't tracked yet, track it now
+            try
+            {
+                await _gitTracker.EnsureBranchTrackedAsync(repository, targetBranch, cancellationToken);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return JsonSerializer.Serialize(new
+                {
+                    error = ex.Message,
+                    availableBranches = await _gitTracker.GetRemoteBranchesAsync(repository, cancellationToken)
+                });
+            }
+
             // TODO: Step 3-7 will implement the full query orchestration:
             // 1. Intent detection (search vs navigation vs relations)
             // 2. Query parsing and expansion
@@ -50,38 +80,35 @@ public sealed class CodeIndexTool
             // 5. Return formatted results
 
             // For now (Step 2), we can only provide repository status
-            var repos = _gitTracker.GetRepositories();
-
-            // Filter by repository (required parameter)
-            var filteredRepos = repos.Where(r => r.Key.Equals(repository, StringComparison.OrdinalIgnoreCase));
-
             var result = new
             {
                 query,
+                repository,
+                branch = targetBranch,
                 status = "partial_implementation",
                 message = "Full query orchestration not yet implemented. Currently showing repository status only.",
-                note = "Steps 3-7 will add: parsing, symbol extraction, PostgreSQL storage, embeddings, and hybrid search.",
-                repositories = filteredRepos.Select(r => new
+                note = "Phase 1 complete: Lazy on-demand branch tracking. Steps 3-7 will add: parsing, symbol extraction, PostgreSQL storage, embeddings, and hybrid search.",
+                repositoryInfo = new
                 {
-                    name = r.Value.Name,
-                    remoteUrl = r.Value.RemoteUrl,
-                    defaultBranch = r.Value.DefaultBranch,
-                    isCloned = r.Value.IsCloned,
-                    lastUpdated = r.Value.LastUpdated,
-                    branches = r.Value.Branches
-                        .Where(b => branch == null || b.Key.Equals(branch, StringComparison.OrdinalIgnoreCase))
-                        .Select(b => new
-                        {
-                            name = b.Value.Name,
-                            currentSha = b.Value.CurrentSha,
-                            lastIndexedSha = b.Value.LastIndexedSha,
-                            lastIndexed = b.Value.LastIndexed,
-                            needsIndexing = b.Value.NeedsIndexing
-                        }).ToArray()
-                }).ToArray()
+                    name = repoState.Name,
+                    remoteUrl = repoState.RemoteUrl,
+                    defaultBranch = repoState.DefaultBranch,
+                    isCloned = repoState.IsCloned,
+                    lastUpdated = repoState.LastUpdated,
+                    trackedBranches = repoState.Branches.Select(b => new
+                    {
+                        name = b.Value.Name,
+                        currentSha = b.Value.CurrentSha,
+                        lastIndexedSha = b.Value.LastIndexedSha,
+                        lastIndexed = b.Value.LastIndexed,
+                        lastAccessed = b.Value.LastAccessed,
+                        needsIndexing = b.Value.NeedsIndexing,
+                        isQueried = b.Key.Equals(targetBranch, StringComparison.OrdinalIgnoreCase)
+                    }).ToArray()
+                }
             };
 
-            return Task.FromResult(JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
+            return JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
         }
         catch (Exception ex)
         {
@@ -95,7 +122,7 @@ public sealed class CodeIndexTool
                 errorType = ex.GetType().Name
             };
 
-            return Task.FromResult(JsonSerializer.Serialize(errorResult, new JsonSerializerOptions { WriteIndented = true }));
+            return JsonSerializer.Serialize(errorResult, new JsonSerializerOptions { WriteIndented = true });
         }
     }
 }

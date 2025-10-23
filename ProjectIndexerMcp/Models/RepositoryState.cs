@@ -67,6 +67,11 @@ public sealed class BranchState
     public DateTimeOffset? LastIndexed { get; set; }
 
     /// <summary>
+    /// Last time this branch was accessed/queried (for cache eviction).
+    /// </summary>
+    public DateTimeOffset? LastAccessed { get; set; }
+
+    /// <summary>
     /// Whether this branch needs indexing.
     /// </summary>
     public bool NeedsIndexing => LastIndexedSha != CurrentSha;

@@ -26,6 +26,15 @@ public sealed class GitTrackerService : IDisposable
     }
 
     /// <summary>
+    /// Creates credentials provider for Git operations (uses SSH agent for authentication).
+    /// </summary>
+    private Credentials CreateCredentialsProvider(string url, string usernameFromUrl, SupportedCredentialTypes types)
+    {
+        _logger.LogDebug("Credentials requested for {Url}, username: {Username}, types: {Types}", url, usernameFromUrl, types);
+        return new DefaultCredentials();
+    }
+
+    /// <summary>
     /// Initializes all configured repositories.
     /// </summary>
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -59,7 +68,7 @@ public sealed class GitTrackerService : IDisposable
             Name = config.Name,
             RemoteUrl = config.RemoteUrl,
             LocalPath = localPath,
-            DefaultBranch = config.DefaultBranch.Trim().ToLowerInvariant(), // Normalize
+            DefaultBranch = config.DefaultBranch.Trim(),
             IsCloned = false
         });
 
@@ -86,6 +95,13 @@ public sealed class GitTrackerService : IDisposable
             {
                 _logger.LogInformation("Cloning repository {Name} from {Url} to {Path}", state.Name, state.RemoteUrl, state.LocalPath);
 
+                // Clean up any existing directory that's not a valid repository
+                if (Directory.Exists(state.LocalPath))
+                {
+                    _logger.LogWarning("Removing invalid repository directory at {Path}", state.LocalPath);
+                    Directory.Delete(state.LocalPath, recursive: true);
+                }
+
                 Directory.CreateDirectory(state.LocalPath);
 
                 var cloneOptions = new CloneOptions
@@ -94,6 +110,9 @@ public sealed class GitTrackerService : IDisposable
                     Checkout = false,
                     RecurseSubmodules = false
                 };
+
+                // Configure SSH credentials for cloning
+                cloneOptions.FetchOptions.CredentialsProvider = CreateCredentialsProvider;
 
                 await Task.Run(() => Repository.Clone(state.RemoteUrl, state.LocalPath, cloneOptions), cancellationToken);
 
@@ -107,8 +126,8 @@ public sealed class GitTrackerService : IDisposable
             state.IsCloned = true;
             state.LastUpdated = DateTimeOffset.UtcNow;
 
-            // Initialize default branch tracking
-            await TrackBranchAsync(state, state.DefaultBranch, cancellationToken);
+            // Track the default branch (without acquiring lock since we already have it)
+            await UpdateBranchInternalAsync(state, state.DefaultBranch, cancellationToken);
         }
         finally
         {
@@ -117,72 +136,70 @@ public sealed class GitTrackerService : IDisposable
     }
 
     /// <summary>
-    /// Tracks a specific branch and updates its state.
+    /// Updates a branch by fetching from remote and updating its state.
+    /// Acquires the update lock.
     /// </summary>
-    public async Task<BranchState> TrackBranchAsync(string repositoryName, string branchName, CancellationToken cancellationToken = default)
-    {
-        if (!_repositories.TryGetValue(repositoryName, out var state))
-        {
-            throw new InvalidOperationException($"Repository {repositoryName} is not initialized");
-        }
-
-        return await TrackBranchAsync(state, branchName, cancellationToken);
-    }
-
-    /// <summary>
-    /// Tracks a specific branch and updates its state.
-    /// </summary>
-    private async Task<BranchState> TrackBranchAsync(RepositoryState repoState, string branchName, CancellationToken cancellationToken)
+    private async Task<BranchState> UpdateBranchAsync(RepositoryState repoState, string branchName, CancellationToken cancellationToken)
     {
         await _updateLock.WaitAsync(cancellationToken);
         try
         {
-            using var repo = new Repository(repoState.LocalPath);
-
-            // Fetch latest changes
-            _logger.LogInformation("Fetching updates for repository {Name}", repoState.Name);
-            var remote = repo.Network.Remotes["origin"];
-            var refSpecs = remote.FetchRefSpecs.Select(x => x.Specification);
-
-            await Task.Run(() => Commands.Fetch(repo, remote.Name, refSpecs, new FetchOptions(), null), cancellationToken);
-
-            // Find the branch
-            var remoteBranchName = $"origin/{branchName}";
-            var branch = repo.Branches[remoteBranchName];
-
-            if (branch == null)
-            {
-                throw new InvalidOperationException($"Branch {branchName} not found in repository {repoState.Name}");
-            }
-
-            var currentSha = branch.Tip.Sha;
-
-            var branchState = repoState.Branches.GetValueOrDefault(branchName);
-            if (branchState == null)
-            {
-                branchState = new BranchState
-                {
-                    Name = branchName,
-                    CurrentSha = currentSha
-                };
-                repoState.Branches[branchName] = branchState;
-                _logger.LogInformation("Started tracking branch {Branch} in repository {Repo} at {Sha}",
-                    branchName, repoState.Name, currentSha);
-            }
-            else
-            {
-                branchState.CurrentSha = currentSha;
-                _logger.LogInformation("Updated branch {Branch} in repository {Repo} to {Sha}",
-                    branchName, repoState.Name, currentSha);
-            }
-
-            repoState.LastUpdated = DateTimeOffset.UtcNow;
-            return branchState;
+            return await UpdateBranchInternalAsync(repoState, branchName, cancellationToken);
         }
         finally
         {
             _updateLock.Release();
         }
+    }
+
+    /// <summary>
+    /// Internal method to update a branch without acquiring the lock (assumes lock is already held).
+    /// Fetches from remote and updates the branch state.
+    /// </summary>
+    private async Task<BranchState> UpdateBranchInternalAsync(RepositoryState repoState, string branchName, CancellationToken cancellationToken)
+    {
+        using var repo = new Repository(repoState.LocalPath);
+
+        // Fetch latest changes
+        _logger.LogInformation("Fetching updates for repository {Name}", repoState.Name);
+        var remote = repo.Network.Remotes["origin"];
+        var refSpecs = remote.FetchRefSpecs.Select(x => x.Specification);
+
+        var fetchOptions = new FetchOptions
+        {
+            CredentialsProvider = CreateCredentialsProvider
+        };
+
+        await Task.Run(() => Commands.Fetch(repo, remote.Name, refSpecs, fetchOptions, null), cancellationToken);
+
+        // Find the branch
+        var remoteBranchName = $"origin/{branchName}";
+        var branch = repo.Branches[remoteBranchName]
+            ?? throw new InvalidOperationException($"Branch {branchName} not found in repository {repoState.Name}");
+
+        var currentSha = branch.Tip.Sha;
+
+        var branchState = repoState.Branches.GetValueOrDefault(branchName);
+        if (branchState == null)
+        {
+            branchState = new BranchState
+            {
+                Name = branchName,
+                CurrentSha = currentSha,
+                LastAccessed = DateTimeOffset.UtcNow
+            };
+            repoState.Branches[branchName] = branchState;
+            _logger.LogInformation("Started tracking branch {Branch} in repository {Repo} at {Sha}", branchName, repoState.Name, currentSha);
+        }
+        else
+        {
+            branchState.CurrentSha = currentSha;
+            branchState.LastAccessed = DateTimeOffset.UtcNow;
+            _logger.LogInformation("Updated branch {Branch} in repository {Repo} to {Sha}", branchName, repoState.Name, currentSha);
+        }
+
+        repoState.LastUpdated = DateTimeOffset.UtcNow;
+        return branchState;
     }
 
     /// <summary>
@@ -301,6 +318,68 @@ public sealed class GitTrackerService : IDisposable
     /// Gets all tracked repositories.
     /// </summary>
     public IReadOnlyDictionary<string, RepositoryState> GetRepositories() => _repositories;
+
+    /// <summary>
+    /// Gets all remote branches for a repository without tracking them.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> GetRemoteBranchesAsync(string repositoryName, CancellationToken cancellationToken = default)
+    {
+        if (!_repositories.TryGetValue(repositoryName, out var repoState))
+        {
+            throw new InvalidOperationException($"Repository {repositoryName} is not initialized");
+        }
+
+        return await Task.Run(() =>
+        {
+            using var repo = new Repository(repoState.LocalPath);
+
+            // Get all remote branches (origin/*)
+            return repo.Branches
+                .Where(b => b.IsRemote && b.FriendlyName.StartsWith("origin/", StringComparison.Ordinal))
+                .Select(b => b.FriendlyName["origin/".Length..])
+                .ToList();
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Checks if a branch exists remotely without tracking it.
+    /// </summary>
+    public async Task<bool> BranchExistsAsync(string repositoryName, string branchName, CancellationToken cancellationToken = default)
+    {
+        if (!_repositories.TryGetValue(repositoryName, out var repoState))
+        {
+            throw new InvalidOperationException($"Repository {repositoryName} is not initialized");
+        }
+
+        return await Task.Run(() =>
+        {
+            using var repo = new Repository(repoState.LocalPath);
+            var remoteBranchName = $"origin/{branchName}";
+            return repo.Branches[remoteBranchName] is not null;
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Ensures a branch is tracked and up-to-date by always fetching the latest data from remote.
+    /// If the branch is not tracked, it will be tracked on-demand.
+    /// Always fetches from remote to ensure we have the latest commits.
+    /// </summary>
+    public async Task<BranchState> EnsureBranchTrackedAsync(string repositoryName, string branchName, CancellationToken cancellationToken = default)
+    {
+        if (!_repositories.TryGetValue(repositoryName, out var repoState))
+        {
+            throw new InvalidOperationException($"Repository {repositoryName} is not initialized");
+        }
+
+        // Always fetch and update the branch to ensure we have the latest data
+        // This is important because changes could have happened at any time
+        _logger.LogDebug("Fetching latest data for branch {Branch} in repository {Repo}", branchName, repositoryName);
+
+        var branchState = await UpdateBranchAsync(repoState, branchName, cancellationToken);
+        branchState.LastAccessed = DateTimeOffset.UtcNow;
+
+        return branchState;
+    }
 
     public void Dispose()
     {
