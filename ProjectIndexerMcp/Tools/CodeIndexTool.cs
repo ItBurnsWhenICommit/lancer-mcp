@@ -1,7 +1,7 @@
-using ModelContextProtocol.Server;
-using ProjectIndexerMcp.Services;
 using System.ComponentModel;
 using System.Text.Json;
+using ModelContextProtocol.Server;
+using ProjectIndexerMcp.Services;
 
 namespace ProjectIndexerMcp.Tools;
 

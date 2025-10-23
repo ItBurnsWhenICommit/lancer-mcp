@@ -1,8 +1,8 @@
+using System.Collections.Concurrent;
 using LibGit2Sharp;
 using Microsoft.Extensions.Options;
 using ProjectIndexerMcp.Configuration;
 using ProjectIndexerMcp.Models;
-using System.Collections.Concurrent;
 
 namespace ProjectIndexerMcp.Services;
 

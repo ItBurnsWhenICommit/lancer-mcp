@@ -19,7 +19,7 @@ public sealed class GitTrackerHostedService : IHostedService
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("Starting Git tracker initialization");
-        
+
         try
         {
             await _gitTracker.InitializeAsync(cancellationToken);
