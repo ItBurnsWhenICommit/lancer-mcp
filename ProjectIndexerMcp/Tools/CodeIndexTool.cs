@@ -30,8 +30,8 @@ public sealed class CodeIndexTool
     public Task<string> Query(
         [Description("Natural language query describing what you're looking for. Examples: 'find all classes that implement IRepository', 'show me the definition of UserService', 'what calls the Login method?', 'find recent changes in authentication code'")]
         string query,
-        [Description("Optional: specific repository name to search in. If not provided, searches all tracked repositories.")]
-        string? repository = null,
+        [Description("Specific repository name to search in. Must match one of the configured repository names.")]
+        string repository,
         [Description("Optional: specific branch to search in. If not provided, uses the default branch.")]
         string? branch = null,
         [Description("Optional: maximum number of results to return (default: 50)")]
@@ -40,7 +40,7 @@ public sealed class CodeIndexTool
     {
         try
         {
-            _logger.LogInformation("Processing query: {Query} (repo: {Repo}, branch: {Branch})", query, repository ?? "all", branch ?? "default");
+            _logger.LogInformation("Processing query: {Query} (repo: {Repo}, branch: {Branch})", query, repository, branch ?? "default");
 
             // TODO: Step 3-7 will implement the full query orchestration:
             // 1. Intent detection (search vs navigation vs relations)
@@ -52,10 +52,8 @@ public sealed class CodeIndexTool
             // For now (Step 2), we can only provide repository status
             var repos = _gitTracker.GetRepositories();
 
-            // Filter by repository if specified
-            var filteredRepos = repository != null
-                ? repos.Where(r => r.Key.Equals(repository, StringComparison.OrdinalIgnoreCase))
-                : repos;
+            // Filter by repository (required parameter)
+            var filteredRepos = repos.Where(r => r.Key.Equals(repository, StringComparison.OrdinalIgnoreCase));
 
             var result = new
             {
