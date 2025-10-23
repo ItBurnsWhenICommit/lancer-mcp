@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Options;
-using ModelContextProtocol.Server;
 using ProjectIndexerMcp.Configuration;
-using System.ComponentModel;
+using ProjectIndexerMcp.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -41,6 +40,11 @@ builder.Services.PostConfigure<ServerOptions>(options =>
 });
 // ----- End configuration section -----
 
+// ----- Service registration -----
+builder.Services.AddSingleton<GitTrackerService>();
+builder.Services.AddHostedService<GitTrackerHostedService>();
+// ----- End service registration -----
+
 builder.Services
     .AddMcpServer()
     .WithHttpTransport()
@@ -71,12 +75,5 @@ app.Use(async (context, next) =>
 // ----- End authentication check -----
 
 app.MapMcp();
-app.MapGet("/", () => "Hello World!");
+app.MapGet("/", () => "Project Indexer MCP Server - Use the 'Query' tool to search code.");
 app.Run();
-
-[McpServerToolType]
-public static class HelloWorldTool
-{
-    [McpServerTool, Description("Returns a static hello world message.")]
-    public static string HelloWorld() => "hello world";
-}

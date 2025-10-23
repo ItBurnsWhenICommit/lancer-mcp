@@ -1,9 +1,11 @@
 {
   "version": 2,
-  "dgSpecHash": "mZlF+E6fXRA=",
+  "dgSpecHash": "Igb15sUXmVA=",
   "success": true,
   "projectFilePath": "/home/alex/Documents/repos/project-indexer-mcp/ProjectIndexerMcp/ProjectIndexerMcp.csproj",
   "expectedPackageFiles": [
+    "/home/alex/.nuget/packages/libgit2sharp/0.31.0/libgit2sharp.0.31.0.nupkg.sha512",
+    "/home/alex/.nuget/packages/libgit2sharp.nativebinaries/2.0.323/libgit2sharp.nativebinaries.2.0.323.nupkg.sha512",
     "/home/alex/.nuget/packages/microsoft.extensions.ai.abstractions/9.10.0/microsoft.extensions.ai.abstractions.9.10.0.nupkg.sha512",
     "/home/alex/.nuget/packages/microsoft.extensions.configuration.abstractions/9.0.10/microsoft.extensions.configuration.abstractions.9.0.10.nupkg.sha512",
     "/home/alex/.nuget/packages/microsoft.extensions.dependencyinjection.abstractions/9.0.10/microsoft.extensions.dependencyinjection.abstractions.9.0.10.nupkg.sha512",
