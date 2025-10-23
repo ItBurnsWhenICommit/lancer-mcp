@@ -381,6 +381,59 @@ public sealed class GitTrackerService : IDisposable
         return branchState;
     }
 
+    /// <summary>
+    /// Cleans up stale branches that haven't been accessed for the specified number of days.
+    /// Returns the number of branches removed.
+    /// </summary>
+    public async Task<int> CleanupStaleBranchesAsync(int staleDays, CancellationToken cancellationToken = default)
+    {
+        await _updateLock.WaitAsync(cancellationToken);
+        try
+        {
+            var cutoffDate = DateTimeOffset.UtcNow.AddDays(-staleDays);
+            var totalRemoved = 0;
+
+            foreach (var (repoName, repoState) in _repositories)
+            {
+                var staleBranches = repoState.Branches
+                    .Where(kvp => kvp.Value.LastAccessed < cutoffDate && kvp.Key != repoState.DefaultBranch)
+                    .Select(kvp => kvp.Key)
+                    .ToList();
+
+                foreach (var branchName in staleBranches)
+                {
+                    if (repoState.Branches.Remove(branchName, out var removedBranch))
+                    {
+                        _logger.LogInformation(
+                            "Removed stale branch {Branch} from repository {Repo} (last accessed: {LastAccessed})",
+                            branchName, repoName, removedBranch.LastAccessed);
+                        totalRemoved++;
+                    }
+                }
+
+                if (staleBranches.Count > 0)
+                {
+                    _logger.LogInformation("Cleaned up {Count} stale branches from repository {Repo}", staleBranches.Count, repoName);
+                }
+            }
+
+            if (totalRemoved > 0)
+            {
+                _logger.LogInformation("Total stale branches cleaned up: {Count} (older than {Days} days)", totalRemoved, staleDays);
+            }
+            else
+            {
+                _logger.LogDebug("No stale branches found for cleanup");
+            }
+
+            return totalRemoved;
+        }
+        finally
+        {
+            _updateLock.Release();
+        }
+    }
+
     public void Dispose()
     {
         if (_disposed)

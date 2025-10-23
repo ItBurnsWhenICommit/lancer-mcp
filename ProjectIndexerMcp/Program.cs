@@ -43,6 +43,7 @@ builder.Services.PostConfigure<ServerOptions>(options =>
 // ----- Service registration -----
 builder.Services.AddSingleton<GitTrackerService>();
 builder.Services.AddHostedService<GitTrackerHostedService>();
+builder.Services.AddHostedService<BranchCleanupHostedService>();
 // ----- End service registration -----
 
 builder.Services

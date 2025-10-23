@@ -53,6 +53,12 @@ public sealed class ServerOptions
     public int FileReadConcurrency { get; set; } = Environment.ProcessorCount;
 
     /// <summary>
+    /// Number of days after which unaccessed branches are considered stale and eligible for cleanup.
+    /// Default is 14 days.
+    /// </summary>
+    public int StaleBranchDays { get; set; } = 14;
+
+    /// <summary>
     /// Optional explicit extensions that should be indexed even if they appear binary.
     /// </summary>
     public string[] IncludeExtensions { get; set; } = Array.Empty<string>();
