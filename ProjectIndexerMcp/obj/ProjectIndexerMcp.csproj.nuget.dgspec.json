@@ -48,6 +48,10 @@
             "ModelContextProtocol": {
               "target": "Package",
               "version": "[0.4.0-preview.3, )"
+            },
+            "ModelContextProtocol.AspNetCore": {
+              "target": "Package",
+              "version": "[0.4.0-preview.3, )"
             }
           },
           "imports": [

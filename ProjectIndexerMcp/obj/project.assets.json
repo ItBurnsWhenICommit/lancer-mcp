@@ -184,6 +184,25 @@
           }
         }
       },
+      "ModelContextProtocol.AspNetCore/0.4.0-preview.3": {
+        "type": "package",
+        "dependencies": {
+          "ModelContextProtocol": "0.4.0-preview.3"
+        },
+        "compile": {
+          "lib/net9.0/ModelContextProtocol.AspNetCore.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net9.0/ModelContextProtocol.AspNetCore.dll": {
+            "related": ".xml"
+          }
+        },
+        "frameworkReferences": [
+          "Microsoft.AspNetCore.App"
+        ]
+      },
       "ModelContextProtocol.Core/0.4.0-preview.3": {
         "type": "package",
         "dependencies": {
@@ -550,6 +569,25 @@
         "modelcontextprotocol.nuspec"
       ]
     },
+    "ModelContextProtocol.AspNetCore/0.4.0-preview.3": {
+      "sha512": "ooPoqISh508mnXenKO1Sssg0jPxAo8EBwaOnsGPvlktUJyw1TFGqmtdGZFFrobaKW2al4b4xGfLNUm8SYA3yAA==",
+      "type": "package",
+      "path": "modelcontextprotocol.aspnetcore/0.4.0-preview.3",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "README.md",
+        "lib/net10.0/ModelContextProtocol.AspNetCore.dll",
+        "lib/net10.0/ModelContextProtocol.AspNetCore.xml",
+        "lib/net8.0/ModelContextProtocol.AspNetCore.dll",
+        "lib/net8.0/ModelContextProtocol.AspNetCore.xml",
+        "lib/net9.0/ModelContextProtocol.AspNetCore.dll",
+        "lib/net9.0/ModelContextProtocol.AspNetCore.xml",
+        "logo.png",
+        "modelcontextprotocol.aspnetcore.0.4.0-preview.3.nupkg.sha512",
+        "modelcontextprotocol.aspnetcore.nuspec"
+      ]
+    },
     "ModelContextProtocol.Core/0.4.0-preview.3": {
       "sha512": "r6/cThY2hDnBHB0qrZ195jw7Ks3vN5bi+uqgUa+19OS9E3+/L7OZ267dlrRmIDiBIwcQDqhpe3/p6BgsULkfug==",
       "type": "package",
@@ -603,7 +641,8 @@
   },
   "projectFileDependencyGroups": {
     "net9.0": [
-      "ModelContextProtocol >= 0.4.0-preview.3"
+      "ModelContextProtocol >= 0.4.0-preview.3",
+      "ModelContextProtocol.AspNetCore >= 0.4.0-preview.3"
     ]
   },
   "packageFolders": {
@@ -651,6 +690,10 @@
         "targetAlias": "net9.0",
         "dependencies": {
           "ModelContextProtocol": {
+            "target": "Package",
+            "version": "[0.4.0-preview.3, )"
+          },
+          "ModelContextProtocol.AspNetCore": {
             "target": "Package",
             "version": "[0.4.0-preview.3, )"
           }

@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Options;
+using ModelContextProtocol.Server;
 using ProjectIndexerMcp.Configuration;
+using System.ComponentModel;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -39,6 +41,10 @@ builder.Services.PostConfigure<ServerOptions>(options =>
 });
 // ----- End configuration section -----
 
+builder.Services
+    .AddMcpServer()
+    .WithHttpTransport()
+    .WithToolsFromAssembly();
 
 var app = builder.Build();
 
@@ -64,6 +70,13 @@ app.Use(async (context, next) =>
 });
 // ----- End authentication check -----
 
+app.MapMcp();
 app.MapGet("/", () => "Hello World!");
-
 app.Run();
+
+[McpServerToolType]
+public static class HelloWorldTool
+{
+    [McpServerTool, Description("Returns a static hello world message.")]
+    public static string HelloWorld() => "hello world";
+}
