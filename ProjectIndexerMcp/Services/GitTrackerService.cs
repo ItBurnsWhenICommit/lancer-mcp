@@ -203,6 +203,32 @@ public sealed class GitTrackerService : IDisposable
     }
 
     /// <summary>
+    /// Marks a branch as indexed at its current commit SHA.
+    /// </summary>
+    public void MarkBranchAsIndexed(string repositoryName, string branchName)
+    {
+        if (!_repositories.TryGetValue(repositoryName, out var repoState))
+        {
+            throw new InvalidOperationException($"Repository {repositoryName} is not initialized");
+        }
+
+        if (!repoState.Branches.TryGetValue(branchName, out var branchState))
+        {
+            throw new InvalidOperationException($"Branch {branchName} is not tracked in repository {repositoryName}");
+        }
+
+        branchState.LastIndexedSha = branchState.CurrentSha;
+        branchState.LastIndexed = DateTimeOffset.UtcNow;
+        branchState.LastAccessed = DateTimeOffset.UtcNow;
+
+        _logger.LogInformation(
+            "Marked branch {Branch} in repository {Repo} as indexed at {Sha}",
+            branchName,
+            repositoryName,
+            branchState.CurrentSha);
+    }
+
+    /// <summary>
     /// Gets file changes between the last indexed commit and the current commit for a branch.
     /// </summary>
     public async Task<IReadOnlyList<FileChange>> GetFileChangesAsync(
@@ -242,23 +268,37 @@ public sealed class GitTrackerService : IDisposable
             lastIndexedCommit = repo.Lookup<Commit>(branchState.LastIndexedSha);
         }
 
-        // If no previous index, get all files from current commit
+        // If no previous index, get all files from current commit (recursively)
         if (lastIndexedCommit == null)
         {
-            foreach (var entry in currentCommit.Tree)
+            // Recursively traverse the entire tree to get all files
+            void TraverseTree(Tree tree, string basePath = "")
             {
-                if (entry.TargetType == TreeEntryTargetType.Blob)
+                foreach (var entry in tree)
                 {
-                    changes.Add(new FileChange
+                    var fullPath = string.IsNullOrEmpty(basePath) ? entry.Name : $"{basePath}/{entry.Name}";
+
+                    if (entry.TargetType == TreeEntryTargetType.Blob)
                     {
-                        RepositoryName = repoState.Name,
-                        BranchName = branchState.Name,
-                        CommitSha = currentCommit.Sha,
-                        FilePath = entry.Path,
-                        ChangeType = ChangeType.Added
-                    });
+                        changes.Add(new FileChange
+                        {
+                            RepositoryName = repoState.Name,
+                            BranchName = branchState.Name,
+                            CommitSha = currentCommit.Sha,
+                            FilePath = fullPath,
+                            ChangeType = ChangeType.Added
+                        });
+                    }
+                    else if (entry.TargetType == TreeEntryTargetType.Tree)
+                    {
+                        // Recursively traverse subdirectory
+                        var subTree = (Tree)entry.Target;
+                        TraverseTree(subTree, fullPath);
+                    }
                 }
             }
+
+            TraverseTree(currentCommit.Tree);
         }
         else
         {
@@ -293,26 +333,7 @@ public sealed class GitTrackerService : IDisposable
         return changes;
     }
 
-    /// <summary>
-    /// Marks a branch as indexed up to the current commit.
-    /// </summary>
-    public void MarkBranchIndexed(string repositoryName, string branchName)
-    {
-        if (!_repositories.TryGetValue(repositoryName, out var repoState))
-        {
-            throw new InvalidOperationException($"Repository {repositoryName} is not initialized");
-        }
 
-        if (!repoState.Branches.TryGetValue(branchName, out var branchState))
-        {
-            throw new InvalidOperationException($"Branch {branchName} is not tracked in repository {repositoryName}");
-        }
-
-        branchState.LastIndexedSha = branchState.CurrentSha;
-        branchState.LastIndexed = DateTimeOffset.UtcNow;
-
-        _logger.LogInformation("Marked branch {Branch} in repository {Repo} as indexed at {Sha}", branchName, repositoryName, branchState.CurrentSha);
-    }
 
     /// <summary>
     /// Gets all tracked repositories.
@@ -432,6 +453,71 @@ public sealed class GitTrackerService : IDisposable
         {
             _updateLock.Release();
         }
+    }
+
+    /// <summary>
+    /// Gets the local path for a repository.
+    /// </summary>
+    public string? GetRepositoryPath(string repositoryName)
+    {
+        return _repositories.TryGetValue(repositoryName, out var repoState) ? repoState.LocalPath : null;
+    }
+
+    /// <summary>
+    /// Gets the content of a file from a specific commit in a repository.
+    /// Reads directly from Git object database (pack files), not from working directory.
+    /// </summary>
+    /// <param name="repositoryName">Repository name.</param>
+    /// <param name="commitSha">Commit SHA.</param>
+    /// <param name="filePath">File path relative to repository root.</param>
+    /// <returns>File content as string, or null if file not found.</returns>
+    public async Task<string?> GetFileContentAsync(string repositoryName, string commitSha, string filePath, CancellationToken cancellationToken = default)
+    {
+        if (!_repositories.TryGetValue(repositoryName, out var repoState))
+        {
+            throw new InvalidOperationException($"Repository {repositoryName} is not initialized");
+        }
+
+        return await Task.Run(() =>
+        {
+            using var repo = new Repository(repoState.LocalPath);
+
+            // Look up the commit
+            var commit = repo.Lookup<Commit>(commitSha);
+            if (commit == null)
+            {
+                _logger.LogWarning("Commit {Sha} not found in repository {Repo}", commitSha, repositoryName);
+                return null;
+            }
+
+            // Navigate to the file in the commit's tree
+            var treeEntry = commit[filePath];
+            if (treeEntry == null)
+            {
+                _logger.LogDebug("File {FilePath} not found in commit {Sha}", filePath, commitSha);
+                return null;
+            }
+
+            // Check if it's a blob (file)
+            if (treeEntry.TargetType != TreeEntryTargetType.Blob)
+            {
+                _logger.LogDebug("Path {FilePath} is not a file in commit {Sha}", filePath, commitSha);
+                return null;
+            }
+
+            // Get the blob and read its content
+            var blob = (Blob)treeEntry.Target;
+
+            // Check if it's a binary file
+            if (blob.IsBinary)
+            {
+                _logger.LogDebug("File {FilePath} is binary, skipping", filePath);
+                return null;
+            }
+
+            // Read content as text
+            return blob.GetContentText();
+        }, cancellationToken);
     }
 
     public void Dispose()

@@ -35,7 +35,7 @@ public sealed class ServerOptions
     /// Optional maximum size (in bytes) for files to index.
     /// Defaults to 1.5 MB when not set.
     /// </summary>
-    public long? MaxFileBytes { get; set; }
+    public long MaxFileBytes { get; set; } = 1_500_000;
 
     /// <summary>
     /// Optional maximum size for tool responses.

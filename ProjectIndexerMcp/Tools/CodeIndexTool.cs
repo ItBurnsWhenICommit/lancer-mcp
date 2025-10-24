@@ -13,11 +13,16 @@ namespace ProjectIndexerMcp.Tools;
 public sealed class CodeIndexTool
 {
     private readonly GitTrackerService _gitTracker;
+    private readonly IndexingService _indexingService;
     private readonly ILogger<CodeIndexTool> _logger;
 
-    public CodeIndexTool(GitTrackerService gitTracker, ILogger<CodeIndexTool> logger)
+    public CodeIndexTool(
+        GitTrackerService gitTracker,
+        IndexingService indexingService,
+        ILogger<CodeIndexTool> logger)
     {
         _gitTracker = gitTracker;
+        _indexingService = indexingService;
         _logger = logger;
     }
 
@@ -72,22 +77,43 @@ public sealed class CodeIndexTool
                 });
             }
 
-            // TODO: Step 3-7 will implement the full query orchestration:
+            // STEP 3: Index files if needed
+            var branchState = repoState.Branches[targetBranch];
+            if (branchState.NeedsIndexing)
+            {
+                _logger.LogInformation("Branch {Branch} needs indexing, triggering indexing now", targetBranch);
+
+                var fileChanges = await _gitTracker.GetFileChangesAsync(repository, targetBranch, cancellationToken);
+
+                if (fileChanges.Any())
+                {
+                    // Index files (automatically marks branch as indexed)
+                    var indexingResult = await _indexingService.IndexFilesAsync(fileChanges, cancellationToken);
+
+                    _logger.LogInformation(
+                        "Indexed {Count} files: {Symbols} symbols, {Edges} edges",
+                        indexingResult.ParsedFiles.Count,
+                        indexingResult.TotalSymbols,
+                        indexingResult.TotalEdges);
+                }
+            }
+
+            // TODO: Step 4-7 will implement the full query orchestration:
             // 1. Intent detection (search vs navigation vs relations)
             // 2. Query parsing and expansion
             // 3. Hybrid search (BM25 + vector + graph)
             // 4. Result ranking and context packaging
             // 5. Return formatted results
 
-            // For now (Step 2), we can only provide repository status
+            // For now (Step 3), we parse and extract symbols but don't store them yet
             var result = new
             {
                 query,
                 repository,
                 branch = targetBranch,
-                status = "partial_implementation",
-                message = "Full query orchestration not yet implemented. Currently showing repository status only.",
-                note = "Phase 1 complete: Lazy on-demand branch tracking. Steps 3-7 will add: parsing, symbol extraction, PostgreSQL storage, embeddings, and hybrid search.",
+                status = "step_3_complete",
+                message = "Parsing and symbol extraction implemented. Storage and search coming in Steps 4-7.",
+                note = "Step 3 complete: Multi-language parsing with Roslyn (C#) and regex-based parsing (Python, JS, Java, Go, Rust). Next: PostgreSQL storage.",
                 repositoryInfo = new
                 {
                     name = repoState.Name,

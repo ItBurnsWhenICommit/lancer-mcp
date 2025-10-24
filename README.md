@@ -43,7 +43,7 @@ dotnet run --project ProjectIndexerMcp/ProjectIndexerMcp.csproj
 
 The server will start on `http://localhost:5171` and automatically clone/track configured repositories.
 
-## 📚 Current Features (Step 1 & 2 Complete)
+## 📚 Current Features (Steps 1, 2 & 3 Complete)
 
 ### ✅ Git Repository Tracking
 - Automatic cloning of configured repositories
@@ -53,30 +53,80 @@ The server will start on `http://localhost:5171` and automatically clone/track c
 - Incremental change detection (per-branch SHA cursors)
 - Thread-safe concurrent operations
 
+### ✅ Multi-Language Parsing & Symbol Extraction
+- **C# (Roslyn)**: Precise parsing with full semantic analysis
+  - Classes, interfaces, structs, enums
+  - Methods, constructors, properties, fields
+  - Inheritance and interface implementation tracking
+  - Method call graph extraction
+- **Python, JavaScript/TypeScript, Java, Go, Rust**: Regex-based parsing
+  - Classes/structs and functions/methods
+  - Function signatures
+  - Basic symbol extraction
+- **Language Detection**: Automatic detection via file extension and shebang
+- **Concurrent Processing**: Configurable file read concurrency
+
 ### ✅ MCP Tools
 
-- `ListRepositories` - Lists all tracked repositories and their branch states
-- `TrackBranch` - Starts tracking a specific branch in a repository
-- `GetFileChanges` - Gets file changes since the branch was last indexed
-- `MarkBranchIndexed` - Marks a branch as fully indexed up to its current commit
+- `Query` - Unified query interface for code search and navigation (triggers on-demand indexing)
 
 ## 🗺️ Roadmap
 
 - [x] **Step 1**: MCP server bootstrap with HTTP transport
 - [x] **Step 2**: Git tracker (clone, fetch, branch tracking, incremental diffs)
-- [ ] **Step 3**: Multi-language parsing & symbol extraction (Tree-sitter, Roslyn)
+- [x] **Step 3**: Multi-language parsing & symbol extraction (Roslyn for C#, regex-based for others)
 - [ ] **Step 4**: PostgreSQL + pgvector storage
 - [ ] **Step 5**: Embedding generation (code-aware models)
 - [ ] **Step 6**: Hybrid search & query orchestrator
-- [ ] **Step 7**: Unified `code_index.query` MCP tool
+- [ ] **Step 7**: Enhanced query capabilities (semantic search, call graphs, etc.)
 - [ ] **Step 8**: Background indexing pipeline
 
-See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for detailed progress.
+## 🔧 Architecture
+
+### Indexing Pipeline (Step 3)
+
+```
+File Change Detection (GitTrackerService)
+    ↓
+Language Detection (by extension + shebang)
+    ↓
+Parser Selection
+    ├─→ C# → Roslyn (semantic analysis)
+    └─→ Others → BasicParser (regex-based)
+    ↓
+Symbol & Edge Extraction
+    ↓
+In-Memory Storage (Step 4 will add PostgreSQL)
+```
+
+### Supported Languages
+
+| Language | Parser | Symbols Extracted |
+|----------|--------|-------------------|
+| C# | Roslyn | Classes, interfaces, structs, enums, methods, properties, fields, constructors |
+| Python | Regex | Classes, functions, methods |
+| JavaScript/TypeScript | Regex | Classes, functions, arrow functions |
+| Java | Regex | Classes, methods |
+| Go | Regex | Structs, functions |
+| Rust | Regex | Structs, functions |
+
+**Note**: Tree-sitter integration planned for future enhancement to improve parsing accuracy for non-C# languages.
 
 ## 📖 Documentation
 
-- [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) - Detailed implementation progress
 - [LICENSE](LICENSE) - MIT License
+
+## 🧪 Testing
+
+Run all tests:
+```bash
+dotnet test
+```
+
+Run specific test suite:
+```bash
+dotnet test --filter "FullyQualifiedName~IndexingServiceTests"
+```
 
 ## 🙏 Acknowledgments
 

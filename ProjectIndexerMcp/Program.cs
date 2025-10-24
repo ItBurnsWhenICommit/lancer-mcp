@@ -42,6 +42,10 @@ builder.Services.PostConfigure<ServerOptions>(options =>
 
 // ----- Service registration -----
 builder.Services.AddSingleton<GitTrackerService>();
+builder.Services.AddSingleton<LanguageDetectionService>();
+builder.Services.AddSingleton<RoslynParserService>();
+builder.Services.AddSingleton<BasicParserService>();
+builder.Services.AddSingleton<IndexingService>();
 builder.Services.AddHostedService<GitTrackerHostedService>();
 builder.Services.AddHostedService<BranchCleanupHostedService>();
 // ----- End service registration -----

@@ -49,6 +49,10 @@
               "target": "Package",
               "version": "[0.31.0, )"
             },
+            "Microsoft.CodeAnalysis.CSharp.Workspaces": {
+              "target": "Package",
+              "version": "[4.14.0, )"
+            },
             "ModelContextProtocol.AspNetCore": {
               "target": "Package",
               "version": "[0.4.0-preview.3, )"
