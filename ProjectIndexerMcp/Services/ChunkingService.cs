@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Options;
+using ProjectIndexerMcp.Configuration;
 using ProjectIndexerMcp.Models;
 
 namespace ProjectIndexerMcp.Services;
@@ -10,19 +12,16 @@ public sealed class ChunkingService
 {
     private readonly GitTrackerService _gitTracker;
     private readonly ILogger<ChunkingService> _logger;
-
-    // Context overlap configuration (in lines)
-    private const int ContextOverlapLines = 5; // ~30-60 tokens depending on line length
-
-    // Maximum chunk size in characters (to stay within 8k token limit)
-    private const int MaxChunkChars = 30000; // ~7500 tokens (conservative estimate: 4 chars/token)
+    private readonly IOptionsMonitor<ServerOptions> _options;
 
     public ChunkingService(
         GitTrackerService gitTracker,
-        ILogger<ChunkingService> logger)
+        ILogger<ChunkingService> logger,
+        IOptionsMonitor<ServerOptions> options)
     {
         _gitTracker = gitTracker;
         _logger = logger;
+        _options = options;
     }
 
     /// <summary>
@@ -83,10 +82,7 @@ public sealed class ChunkingService
                 }
             }
 
-            _logger.LogDebug("Created {Count} chunks for file {FilePath}",
-                chunks.Count, parsedFile.FilePath);
-
-            return new ChunkedFile
+            var result = new ChunkedFile
             {
                 RepositoryName = parsedFile.RepositoryName,
                 BranchName = parsedFile.BranchName,
@@ -96,6 +92,14 @@ public sealed class ChunkingService
                 Chunks = chunks,
                 Success = true
             };
+
+            _logger.LogInformation(
+                "Chunked file {FilePath}: {ChunkCount} chunks, {TokenCount} total tokens",
+                parsedFile.FilePath,
+                result.TotalChunks,
+                result.TotalTokens);
+
+            return result;
         }
         catch (Exception ex)
         {
@@ -149,28 +153,33 @@ public sealed class ChunkingService
         Language language,
         List<Symbol> allSymbols)
     {
+        // Get configuration values
+        var contextLinesBefore = _options.CurrentValue.ChunkContextLinesBefore;
+        var contextLinesAfter = _options.CurrentValue.ChunkContextLinesAfter;
+        var maxChunkChars = _options.CurrentValue.MaxChunkChars;
+
         // Calculate chunk boundaries with context overlap
-        int chunkStartLine = Math.Max(1, symbol.StartLine - ContextOverlapLines);
-        int chunkEndLine = Math.Min(lines.Length, symbol.EndLine + ContextOverlapLines);
+        int chunkStartLine = Math.Max(1, symbol.StartLine - contextLinesBefore);
+        int chunkEndLine = Math.Min(lines.Length, symbol.EndLine + contextLinesAfter);
 
         // Extract lines (convert from 1-based to 0-based indexing)
         var chunkLines = lines[(chunkStartLine - 1)..chunkEndLine];
         var chunkContent = string.Join('\n', chunkLines);
 
         // Check if chunk is too large
-        if (chunkContent.Length > MaxChunkChars)
+        if (chunkContent.Length > maxChunkChars)
         {
             _logger.LogWarning(
-                "Chunk for symbol {Symbol} in {FilePath} is too large ({Size} chars), truncating",
-                symbol.Name, filePath, chunkContent.Length);
+                "Chunk for symbol {Symbol} in {FilePath} is too large ({Size} chars), truncating to {MaxSize} chars",
+                symbol.Name, filePath, chunkContent.Length, maxChunkChars);
 
             // Truncate to max size (remove context overlap if needed)
             var symbolLines = lines[(symbol.StartLine - 1)..symbol.EndLine];
             chunkContent = string.Join('\n', symbolLines);
 
-            if (chunkContent.Length > MaxChunkChars)
+            if (chunkContent.Length > maxChunkChars)
             {
-                chunkContent = chunkContent[..MaxChunkChars];
+                chunkContent = chunkContent[..maxChunkChars];
             }
 
             chunkStartLine = symbol.StartLine;

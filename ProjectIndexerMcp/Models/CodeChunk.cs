@@ -204,5 +204,15 @@ public sealed class ChunkedFile
     /// When this file was chunked.
     /// </summary>
     public DateTimeOffset ChunkedAt { get; init; } = DateTimeOffset.UtcNow;
+
+    /// <summary>
+    /// Total number of chunks created from this file.
+    /// </summary>
+    public int TotalChunks => Chunks.Count;
+
+    /// <summary>
+    /// Total number of tokens across all chunks in this file.
+    /// </summary>
+    public int TotalTokens => Chunks.Sum(c => c.TokenCount);
 }
 

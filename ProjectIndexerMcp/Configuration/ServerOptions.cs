@@ -118,6 +118,27 @@ public sealed class ServerOptions
     /// </summary>
     public int EmbeddingTimeoutSeconds { get; set; } = 60;
 
+    /// <summary>
+    /// Number of lines of context to include before each symbol when chunking.
+    /// Set to 0 to disable context before symbols.
+    /// Default is 5 lines (~30-60 tokens depending on line length).
+    /// </summary>
+    public int ChunkContextLinesBefore { get; set; } = 5;
+
+    /// <summary>
+    /// Number of lines of context to include after each symbol when chunking.
+    /// Set to 0 to disable context after symbols.
+    /// Default is 5 lines (~30-60 tokens depending on line length).
+    /// </summary>
+    public int ChunkContextLinesAfter { get; set; } = 5;
+
+    /// <summary>
+    /// Maximum chunk size in characters to stay within embedding model context window.
+    /// Default is 30,000 characters (~7,500 tokens with conservative 4 chars/token estimate).
+    /// Chunks exceeding this size will be truncated to fit within the 8k token limit.
+    /// </summary>
+    public int MaxChunkChars { get; set; } = 30_000;
+
 
     public sealed class RepositoryDescriptor
     {
