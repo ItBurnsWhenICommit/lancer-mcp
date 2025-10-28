@@ -45,6 +45,8 @@ builder.Services.AddSingleton<GitTrackerService>();
 builder.Services.AddSingleton<LanguageDetectionService>();
 builder.Services.AddSingleton<RoslynParserService>();
 builder.Services.AddSingleton<BasicParserService>();
+builder.Services.AddSingleton<ChunkingService>();
+builder.Services.AddHttpClient<EmbeddingService>();
 builder.Services.AddSingleton<IndexingService>();
 builder.Services.AddHostedService<GitTrackerHostedService>();
 builder.Services.AddHostedService<BranchCleanupHostedService>();

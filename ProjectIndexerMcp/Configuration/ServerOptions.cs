@@ -97,6 +97,27 @@ public sealed class ServerOptions
         ".nuget"
     };
 
+    /// <summary>
+    /// URL of the Text Embeddings Inference (TEI) service for generating embeddings.
+    /// Example: "http://localhost:8080"
+    /// </summary>
+    public string? EmbeddingServiceUrl { get; set; }
+
+    /// <summary>
+    /// Model name for embeddings (informational, TEI is configured with the model at startup).
+    /// </summary>
+    public string EmbeddingModel { get; set; } = "jinaai/jina-embeddings-v2-base-code";
+
+    /// <summary>
+    /// Batch size for embedding generation requests.
+    /// </summary>
+    public int EmbeddingBatchSize { get; set; } = 32;
+
+    /// <summary>
+    /// Timeout for embedding service requests in seconds.
+    /// </summary>
+    public int EmbeddingTimeoutSeconds { get; set; } = 60;
+
 
     public sealed class RepositoryDescriptor
     {
