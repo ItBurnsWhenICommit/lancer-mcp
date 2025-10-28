@@ -10,23 +10,21 @@ namespace ProjectIndexerMcp.Services;
 /// Service for generating embeddings using Text Embeddings Inference (TEI).
 /// Communicates with a TEI Docker container running jina-embeddings-v2-base-code.
 /// </summary>
-public sealed class EmbeddingService
+public sealed class EmbeddingService : IDisposable
 {
     private readonly HttpClient _httpClient;
-    private readonly IOptions<ServerOptions> _options;
+    private readonly IOptionsMonitor<ServerOptions> _options;
     private readonly ILogger<EmbeddingService> _logger;
+    private bool _disposed;
 
     public EmbeddingService(
         HttpClient httpClient,
-        IOptions<ServerOptions> options,
+        IOptionsMonitor<ServerOptions> options,
         ILogger<EmbeddingService> logger)
     {
         _httpClient = httpClient;
         _options = options;
         _logger = logger;
-
-        // Configure HTTP client timeout
-        _httpClient.Timeout = TimeSpan.FromSeconds(options.Value.EmbeddingTimeoutSeconds);
     }
 
     /// <summary>
@@ -34,14 +32,21 @@ public sealed class EmbeddingService
     /// </summary>
     public async Task<List<Embedding>> GenerateEmbeddingsAsync(IReadOnlyList<CodeChunk> chunks, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrEmpty(_options.Value.EmbeddingServiceUrl))
+        if (chunks.Count == 0)
+        {
+            return new List<Embedding>();
+        }
+
+        if (string.IsNullOrEmpty(_options.CurrentValue.EmbeddingServiceUrl))
         {
             throw new InvalidOperationException(
                 "EmbeddingServiceUrl is not configured. Please set it in appsettings.json or environment variables.");
         }
 
+        _logger.LogInformation("Generating embeddings for {Count} chunks", chunks.Count);
+
         var embeddings = new List<Embedding>();
-        var batchSize = _options.Value.EmbeddingBatchSize;
+        var batchSize = _options.CurrentValue.EmbeddingBatchSize;
 
         // Process chunks in batches
         for (int i = 0; i < chunks.Count; i += batchSize)
@@ -50,8 +55,14 @@ public sealed class EmbeddingService
             var batchEmbeddings = await GenerateBatchEmbeddingsAsync(batch, cancellationToken);
             embeddings.AddRange(batchEmbeddings);
 
-            _logger.LogDebug("Generated embeddings for batch {BatchNum}/{TotalBatches} ({Count} chunks)", (i / batchSize) + 1, (chunks.Count + batchSize - 1) / batchSize, batch.Count);
+            _logger.LogDebug("Generated embeddings for batch {BatchNum}/{TotalBatches} ({Count} chunks)",
+                (i / batchSize) + 1, (chunks.Count + batchSize - 1) / batchSize, batch.Count);
         }
+
+        _logger.LogInformation(
+            "Successfully generated {Count} embeddings using model {Model}",
+            embeddings.Count,
+            _options.CurrentValue.EmbeddingModel);
 
         return embeddings;
     }
@@ -69,18 +80,18 @@ public sealed class EmbeddingService
                 Inputs = chunks.Select(c => c.Content).ToArray()
             };
 
-            var url = $"{_options.Value.EmbeddingServiceUrl!.TrimEnd('/')}/embed";
-
-            // Send request to TEI
-            var response = await _httpClient.PostAsJsonAsync(url, request, cancellationToken);
+            // Send request to TEI (using BaseAddress configured in DI)
+            var response = await _httpClient.PostAsJsonAsync("/embed", request, cancellationToken);
             response.EnsureSuccessStatusCode();
 
             // Parse response
-            var embedResponse = await response.Content.ReadFromJsonAsync<float[][]>(cancellationToken) ?? throw new InvalidOperationException("Received null response from embedding service");
+            var embedResponse = await response.Content.ReadFromJsonAsync<float[][]>(cancellationToken)
+                ?? throw new InvalidOperationException("Embedding service returned null response");
 
             if (embedResponse.Length != chunks.Count)
             {
-                throw new InvalidOperationException($"Expected {chunks.Count} embeddings but received {embedResponse.Length}");
+                throw new InvalidOperationException(
+                    $"Embedding count mismatch: expected {chunks.Count}, got {embedResponse.Length}");
             }
 
             // Create Embedding objects
@@ -97,7 +108,7 @@ public sealed class EmbeddingService
                     BranchName = chunk.BranchName,
                     CommitSha = chunk.CommitSha,
                     Vector = vector,
-                    Model = _options.Value.EmbeddingModel,
+                    Model = _options.CurrentValue.EmbeddingModel,
                     ModelVersion = "v2"
                 });
             }
@@ -106,14 +117,15 @@ public sealed class EmbeddingService
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogError(ex, "HTTP error calling embedding service at {Url}", _options.Value.EmbeddingServiceUrl);
+            var serviceUrl = _options.CurrentValue.EmbeddingServiceUrl;
+            _logger.LogError(ex, "Failed to communicate with embedding service at {Url}", serviceUrl);
             throw new InvalidOperationException(
-                $"Failed to connect to embedding service at {_options.Value.EmbeddingServiceUrl}. " +
+                $"Embedding service unavailable at {serviceUrl}. " +
                 "Make sure the TEI Docker container is running.", ex);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error generating embeddings for {Count} chunks", chunks.Count);
+            _logger.LogError(ex, "Failed to generate embeddings for {Count} chunks", chunks.Count);
             throw;
         }
     }
@@ -123,19 +135,19 @@ public sealed class EmbeddingService
     /// </summary>
     public async Task<bool> IsHealthyAsync(CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrEmpty(_options.Value.EmbeddingServiceUrl))
+        if (string.IsNullOrEmpty(_options.CurrentValue.EmbeddingServiceUrl))
         {
             return false;
         }
 
         try
         {
-            var url = $"{_options.Value.EmbeddingServiceUrl.TrimEnd('/')}/health";
-            var response = await _httpClient.GetAsync(url, cancellationToken);
+            var response = await _httpClient.GetAsync("/health", cancellationToken);
             return response.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogWarning(ex, "Embedding service health check failed");
             return false;
         }
     }
@@ -145,15 +157,14 @@ public sealed class EmbeddingService
     /// </summary>
     public async Task<ModelInfo?> GetModelInfoAsync(CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrEmpty(_options.Value.EmbeddingServiceUrl))
+        if (string.IsNullOrEmpty(_options.CurrentValue.EmbeddingServiceUrl))
         {
             return null;
         }
 
         try
         {
-            var url = $"{_options.Value.EmbeddingServiceUrl.TrimEnd('/')}/info";
-            var response = await _httpClient.GetAsync(url, cancellationToken);
+            var response = await _httpClient.GetAsync("/info", cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -169,14 +180,53 @@ public sealed class EmbeddingService
         }
     }
 
-    // Request/Response DTOs for TEI API
+    /// <summary>
+    /// Disposes the HTTP client resources.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
 
+        _httpClient?.Dispose();
+        _disposed = true;
+    }
+
+    #region DTOs for TEI API communication
+
+    /// <summary>
+    /// Request payload for TEI /embed endpoint.
+    /// </summary>
     private sealed class EmbedRequest
     {
         [JsonPropertyName("inputs")]
         public required string[] Inputs { get; init; }
     }
 
+    /// <summary>
+    /// Response from TEI /embed endpoint.
+    /// TEI returns a simple array of arrays, but we can also accept structured responses.
+    /// </summary>
+    private sealed class EmbedResponse
+    {
+        [JsonPropertyName("embeddings")]
+        public List<List<float>>? Embeddings { get; init; }
+
+        [JsonPropertyName("model")]
+        public string? Model { get; init; }
+
+        [JsonPropertyName("dimension")]
+        public int? Dimension { get; init; }
+
+        [JsonPropertyName("count")]
+        public int? Count { get; init; }
+    }
+
+    /// <summary>
+    /// Response from TEI /info endpoint containing model metadata.
+    /// </summary>
     public sealed class ModelInfo
     {
         [JsonPropertyName("model_id")]
@@ -212,5 +262,6 @@ public sealed class EmbeddingService
         [JsonPropertyName("version")]
         public string? Version { get; init; }
     }
-}
 
+    #endregion
+}

@@ -46,7 +46,21 @@ builder.Services.AddSingleton<LanguageDetectionService>();
 builder.Services.AddSingleton<RoslynParserService>();
 builder.Services.AddSingleton<BasicParserService>();
 builder.Services.AddSingleton<ChunkingService>();
-builder.Services.AddHttpClient<EmbeddingService>();
+
+// Configure HttpClient for EmbeddingService with proper BaseAddress and Timeout
+builder.Services.AddHttpClient<EmbeddingService>((serviceProvider, client) =>
+{
+    var options = serviceProvider.GetRequiredService<IOptionsMonitor<ServerOptions>>();
+    var embeddingUrl = options.CurrentValue.EmbeddingServiceUrl;
+
+    if (!string.IsNullOrEmpty(embeddingUrl))
+    {
+        client.BaseAddress = new Uri(embeddingUrl);
+    }
+
+    client.Timeout = TimeSpan.FromSeconds(options.CurrentValue.EmbeddingTimeoutSeconds);
+});
+
 builder.Services.AddSingleton<IndexingService>();
 builder.Services.AddHostedService<GitTrackerHostedService>();
 builder.Services.AddHostedService<BranchCleanupHostedService>();
