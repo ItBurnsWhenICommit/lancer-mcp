@@ -139,6 +139,78 @@ public sealed class ServerOptions
     /// </summary>
     public int MaxChunkChars { get; set; } = 30_000;
 
+    /// <summary>
+    /// PostgreSQL connection string.
+    /// Example: "Host=localhost;Port=5432;Database=project_indexer;Username=postgres;Password=postgres"
+    /// </summary>
+    public string? DatabaseConnectionString { get; set; }
+
+    /// <summary>
+    /// Database host (alternative to connection string).
+    /// </summary>
+    public string DatabaseHost { get; set; } = "localhost";
+
+    /// <summary>
+    /// Database port (alternative to connection string).
+    /// </summary>
+    public int DatabasePort { get; set; } = 5432;
+
+    /// <summary>
+    /// Database name (alternative to connection string).
+    /// </summary>
+    public string DatabaseName { get; set; } = "project_indexer";
+
+    /// <summary>
+    /// Database username (alternative to connection string).
+    /// </summary>
+    public string DatabaseUser { get; set; } = "postgres";
+
+    /// <summary>
+    /// Database password (alternative to connection string).
+    /// </summary>
+    public string? DatabasePassword { get; set; }
+
+    /// <summary>
+    /// Maximum number of database connections in the pool.
+    /// </summary>
+    public int DatabaseMaxPoolSize { get; set; } = 100;
+
+    /// <summary>
+    /// Minimum number of database connections in the pool.
+    /// </summary>
+    public int DatabaseMinPoolSize { get; set; } = 10;
+
+    /// <summary>
+    /// Database command timeout in seconds.
+    /// </summary>
+    public int DatabaseCommandTimeoutSeconds { get; set; } = 30;
+
+    /// <summary>
+    /// Gets the effective connection string, either from DatabaseConnectionString or built from individual properties.
+    /// </summary>
+    public string GetDatabaseConnectionString()
+    {
+        if (!string.IsNullOrWhiteSpace(DatabaseConnectionString))
+        {
+            return DatabaseConnectionString;
+        }
+
+        var builder = new Npgsql.NpgsqlConnectionStringBuilder
+        {
+            Host = DatabaseHost,
+            Port = DatabasePort,
+            Database = DatabaseName,
+            Username = DatabaseUser,
+            Password = DatabasePassword ?? "postgres",
+            MaxPoolSize = DatabaseMaxPoolSize,
+            MinPoolSize = DatabaseMinPoolSize,
+            CommandTimeout = DatabaseCommandTimeoutSeconds,
+            Pooling = true,
+            IncludeErrorDetail = true
+        };
+
+        return builder.ToString();
+    }
 
     public sealed class RepositoryDescriptor
     {

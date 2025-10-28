@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using ProjectIndexerMcp.Configuration;
+using ProjectIndexerMcp.Repositories;
 using ProjectIndexerMcp.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -41,6 +42,20 @@ builder.Services.PostConfigure<ServerOptions>(options =>
 // ----- End configuration section -----
 
 // ----- Service registration -----
+// Database services
+builder.Services.AddSingleton<DatabaseService>();
+
+// Repository services
+builder.Services.AddSingleton<IRepositoryRepository, RepositoryRepository>();
+builder.Services.AddSingleton<IBranchRepository, BranchRepository>();
+builder.Services.AddSingleton<ICommitRepository, CommitRepository>();
+builder.Services.AddSingleton<IFileRepository, FileRepository>();
+builder.Services.AddSingleton<ISymbolRepository, SymbolRepository>();
+builder.Services.AddSingleton<IEdgeRepository, EdgeRepository>();
+builder.Services.AddSingleton<ICodeChunkRepository, CodeChunkRepository>();
+builder.Services.AddSingleton<IEmbeddingRepository, EmbeddingRepository>();
+
+// Application services
 builder.Services.AddSingleton<GitTrackerService>();
 builder.Services.AddSingleton<LanguageDetectionService>();
 builder.Services.AddSingleton<RoslynParserService>();

@@ -45,6 +45,10 @@
         "net9.0": {
           "targetAlias": "net9.0",
           "dependencies": {
+            "Dapper": {
+              "target": "Package",
+              "version": "[2.1.66, )"
+            },
             "LibGit2Sharp": {
               "target": "Package",
               "version": "[0.31.0, )"
@@ -56,6 +60,14 @@
             "ModelContextProtocol.AspNetCore": {
               "target": "Package",
               "version": "[0.4.0-preview.3, )"
+            },
+            "Npgsql": {
+              "target": "Package",
+              "version": "[9.0.4, )"
+            },
+            "Pgvector": {
+              "target": "Package",
+              "version": "[0.3.2, )"
             }
           },
           "imports": [

@@ -1,9 +1,10 @@
 {
   "version": 2,
-  "dgSpecHash": "Bv4FmXpCJl0=",
+  "dgSpecHash": "26vRfVkJwnY=",
   "success": true,
   "projectFilePath": "/home/alex/Documents/repos/project-indexer-mcp/ProjectIndexerMcp/ProjectIndexerMcp.csproj",
   "expectedPackageFiles": [
+    "/home/alex/.nuget/packages/dapper/2.1.66/dapper.2.1.66.nupkg.sha512",
     "/home/alex/.nuget/packages/humanizer.core/2.14.1/humanizer.core.2.14.1.nupkg.sha512",
     "/home/alex/.nuget/packages/libgit2sharp/0.31.0/libgit2sharp.0.31.0.nupkg.sha512",
     "/home/alex/.nuget/packages/libgit2sharp.nativebinaries/2.0.323/libgit2sharp.nativebinaries.2.0.323.nupkg.sha512",
@@ -24,6 +25,8 @@
     "/home/alex/.nuget/packages/modelcontextprotocol/0.4.0-preview.3/modelcontextprotocol.0.4.0-preview.3.nupkg.sha512",
     "/home/alex/.nuget/packages/modelcontextprotocol.aspnetcore/0.4.0-preview.3/modelcontextprotocol.aspnetcore.0.4.0-preview.3.nupkg.sha512",
     "/home/alex/.nuget/packages/modelcontextprotocol.core/0.4.0-preview.3/modelcontextprotocol.core.0.4.0-preview.3.nupkg.sha512",
+    "/home/alex/.nuget/packages/npgsql/9.0.4/npgsql.9.0.4.nupkg.sha512",
+    "/home/alex/.nuget/packages/pgvector/0.3.2/pgvector.0.3.2.nupkg.sha512",
     "/home/alex/.nuget/packages/system.collections.immutable/9.0.0/system.collections.immutable.9.0.0.nupkg.sha512",
     "/home/alex/.nuget/packages/system.composition/9.0.0/system.composition.9.0.0.nupkg.sha512",
     "/home/alex/.nuget/packages/system.composition.attributedmodel/9.0.0/system.composition.attributedmodel.9.0.0.nupkg.sha512",
