@@ -1,11 +1,12 @@
 using Microsoft.Extensions.Options;
 using ProjectIndexerMcp.Configuration;
 using ProjectIndexerMcp.Models;
+using ProjectIndexerMcp.Repositories;
 
 namespace ProjectIndexerMcp.Services;
 
 /// <summary>
-/// Orchestrates the indexing pipeline: language detection, parsing, and symbol extraction.
+/// Orchestrates the indexing pipeline: language detection, parsing, symbol extraction, chunking, embedding, and storage.
 /// </summary>
 public sealed class IndexingService
 {
@@ -15,6 +16,14 @@ public sealed class IndexingService
     private readonly LanguageDetectionService _languageDetection;
     private readonly RoslynParserService _roslynParser;
     private readonly BasicParserService _basicParser;
+    private readonly ChunkingService _chunkingService;
+    private readonly EmbeddingService _embeddingService;
+    private readonly ICommitRepository _commitRepository;
+    private readonly IFileRepository _fileRepository;
+    private readonly ISymbolRepository _symbolRepository;
+    private readonly IEdgeRepository _edgeRepository;
+    private readonly ICodeChunkRepository _chunkRepository;
+    private readonly IEmbeddingRepository _embeddingRepository;
     private readonly SemaphoreSlim _concurrencyLimiter;
 
     public IndexingService(
@@ -23,7 +32,15 @@ public sealed class IndexingService
         GitTrackerService gitTracker,
         LanguageDetectionService languageDetection,
         RoslynParserService roslynParser,
-        BasicParserService basicParser)
+        BasicParserService basicParser,
+        ChunkingService chunkingService,
+        EmbeddingService embeddingService,
+        ICommitRepository commitRepository,
+        IFileRepository fileRepository,
+        ISymbolRepository symbolRepository,
+        IEdgeRepository edgeRepository,
+        ICodeChunkRepository chunkRepository,
+        IEmbeddingRepository embeddingRepository)
     {
         _logger = logger;
         _options = options;
@@ -31,13 +48,21 @@ public sealed class IndexingService
         _languageDetection = languageDetection;
         _roslynParser = roslynParser;
         _basicParser = basicParser;
+        _chunkingService = chunkingService;
+        _embeddingService = embeddingService;
+        _commitRepository = commitRepository;
+        _fileRepository = fileRepository;
+        _symbolRepository = symbolRepository;
+        _edgeRepository = edgeRepository;
+        _chunkRepository = chunkRepository;
+        _embeddingRepository = embeddingRepository;
 
         var concurrency = options.CurrentValue.FileReadConcurrency;
         _concurrencyLimiter = new SemaphoreSlim(concurrency, concurrency);
     }
 
     /// <summary>
-    /// Indexes a batch of file changes and automatically marks the branch as indexed.
+    /// Indexes a batch of file changes, persists to PostgreSQL, and automatically marks the branch as indexed.
     /// </summary>
     public async Task<IndexingResult> IndexFilesAsync(IEnumerable<FileChange> fileChanges, CancellationToken cancellationToken = default)
     {
@@ -45,6 +70,12 @@ public sealed class IndexingService
         var tasks = new List<Task<ParsedFile?>>();
         var fileChangesList = fileChanges.ToList();
 
+        if (!fileChangesList.Any())
+        {
+            return result;
+        }
+
+        // Step 1: Parse all files
         foreach (var fileChange in fileChangesList)
         {
             // Skip deleted files
@@ -81,7 +112,7 @@ public sealed class IndexingService
         }
 
         _logger.LogInformation(
-            "Indexing complete: {ParsedCount} parsed, {SkippedCount} skipped, {FailedCount} failed, {DeletedCount} deleted, {SymbolCount} symbols, {EdgeCount} edges",
+            "Parsing complete: {ParsedCount} parsed, {SkippedCount} skipped, {FailedCount} failed, {DeletedCount} deleted, {SymbolCount} symbols, {EdgeCount} edges",
             result.ParsedFiles.Count,
             result.SkippedFiles,
             result.FailedFiles,
@@ -89,12 +120,15 @@ public sealed class IndexingService
             result.TotalSymbols,
             result.TotalEdges);
 
-        // Automatically mark the branch as indexed after successful indexing
-        if (fileChangesList.Any())
+        // Step 2: Persist to PostgreSQL
+        if (result.ParsedFiles.Any())
         {
-            var firstChange = fileChangesList.First();
-            _gitTracker.MarkBranchAsIndexed(firstChange.RepositoryName, firstChange.BranchName);
+            await PersistToStorageAsync(result.ParsedFiles, cancellationToken);
         }
+
+        // Step 3: Automatically mark the branch as indexed after successful indexing
+        var firstChange = fileChangesList.First();
+        _gitTracker.MarkBranchAsIndexed(firstChange.RepositoryName, firstChange.BranchName);
 
         return result;
     }
@@ -180,6 +214,105 @@ public sealed class IndexingService
         finally
         {
             _concurrencyLimiter.Release();
+        }
+    }
+
+    /// <summary>
+    /// Persists parsed files, symbols, edges, chunks, and embeddings to PostgreSQL.
+    /// </summary>
+    private async Task PersistToStorageAsync(List<ParsedFile> parsedFiles, CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("Persisting {Count} files to storage...", parsedFiles.Count);
+
+        try
+        {
+            // Step 1: Persist commits (deduplicated)
+            var commits = parsedFiles
+                .GroupBy(f => new { f.RepositoryName, f.BranchName, f.CommitSha })
+                .Select(g => new Commit
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    RepoId = g.First().RepositoryName,
+                    Sha = g.Key.CommitSha,
+                    BranchName = g.Key.BranchName,
+                    AuthorName = "Unknown", // TODO: Get from Git
+                    AuthorEmail = "unknown@example.com",
+                    CommitMessage = "Indexed commit",
+                    CommittedAt = DateTimeOffset.UtcNow,
+                    IndexedAt = DateTimeOffset.UtcNow
+                })
+                .ToList();
+
+            if (commits.Any())
+            {
+                await _commitRepository.CreateBatchAsync(commits, cancellationToken);
+                _logger.LogInformation("Persisted {Count} commits", commits.Count);
+            }
+
+            // Step 2: Persist files (we don't have content size here, will be updated later if needed)
+            var files = parsedFiles.Select(f => new FileMetadata
+            {
+                Id = Guid.NewGuid().ToString(),
+                RepoId = f.RepositoryName,
+                BranchName = f.BranchName,
+                CommitSha = f.CommitSha,
+                FilePath = f.FilePath,
+                Language = f.Language,
+                SizeBytes = 0, // TODO: Get actual file size from Git
+                LineCount = 0, // TODO: Get actual line count from Git
+                IndexedAt = DateTimeOffset.UtcNow
+            }).ToList();
+
+            if (files.Any())
+            {
+                await _fileRepository.CreateBatchAsync(files, cancellationToken);
+                _logger.LogInformation("Persisted {Count} files", files.Count);
+            }
+
+            // Step 3: Persist symbols
+            var allSymbols = parsedFiles.SelectMany(f => f.Symbols).ToList();
+            if (allSymbols.Any())
+            {
+                await _symbolRepository.CreateBatchAsync(allSymbols, cancellationToken);
+                _logger.LogInformation("Persisted {Count} symbols", allSymbols.Count);
+            }
+
+            // Step 4: Persist edges
+            var allEdges = parsedFiles.SelectMany(f => f.Edges).ToList();
+            if (allEdges.Any())
+            {
+                await _edgeRepository.CreateBatchAsync(allEdges, cancellationToken);
+                _logger.LogInformation("Persisted {Count} edges", allEdges.Count);
+            }
+
+            // Step 5: Chunk symbols and persist chunks
+            var allChunks = new List<CodeChunk>();
+            foreach (var parsedFile in parsedFiles)
+            {
+                var chunkedFile = await _chunkingService.ChunkFileAsync(parsedFile, cancellationToken);
+                allChunks.AddRange(chunkedFile.Chunks);
+            }
+
+            if (allChunks.Any())
+            {
+                await _chunkRepository.CreateBatchAsync(allChunks, cancellationToken);
+                _logger.LogInformation("Persisted {Count} chunks", allChunks.Count);
+
+                // Step 6: Generate and persist embeddings
+                var embeddings = await _embeddingService.GenerateEmbeddingsAsync(allChunks, cancellationToken);
+                if (embeddings.Any())
+                {
+                    await _embeddingRepository.CreateBatchAsync(embeddings, cancellationToken);
+                    _logger.LogInformation("Persisted {Count} embeddings", embeddings.Count);
+                }
+            }
+
+            _logger.LogInformation("Storage persistence complete");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to persist data to storage");
+            throw;
         }
     }
 }

@@ -100,6 +100,7 @@ public sealed class RoslynParserService
         private readonly SemanticModel _semanticModel;
         private readonly List<Symbol> _symbols;
         private readonly List<SymbolEdge> _edges;
+        private readonly Dictionary<string, string> _symbolLookup = new(); // QualifiedName -> Symbol ID
         private readonly ILogger _logger;
         private readonly Stack<string> _parentSymbolIds = new();
 
@@ -240,6 +241,13 @@ public sealed class RoslynParserService
             };
 
             _symbols.Add(symbol);
+
+            // Add to lookup table for edge resolution
+            if (!string.IsNullOrEmpty(symbol.QualifiedName))
+            {
+                _symbolLookup[symbol.QualifiedName] = symbol.Id;
+            }
+
             return symbol;
         }
 
@@ -269,6 +277,13 @@ public sealed class RoslynParserService
             };
 
             _symbols.Add(symbol);
+
+            // Add to lookup table for edge resolution
+            if (!string.IsNullOrEmpty(symbol.QualifiedName))
+            {
+                _symbolLookup[symbol.QualifiedName] = symbol.Id;
+            }
+
             return symbol;
         }
 
@@ -282,10 +297,17 @@ public sealed class RoslynParserService
                 var typeInfo = _semanticModel.GetTypeInfo(baseType.Type);
                 if (typeInfo.Type != null)
                 {
+                    var qualifiedName = typeInfo.Type.ToDisplayString();
+
+                    // Try to resolve to a symbol ID, otherwise use qualified name
+                    var targetSymbolId = _symbolLookup.TryGetValue(qualifiedName, out var symbolId)
+                        ? symbolId
+                        : qualifiedName;
+
                     var edge = new SymbolEdge
                     {
                         SourceSymbolId = sourceSymbolId,
-                        TargetSymbolId = typeInfo.Type.ToDisplayString(),
+                        TargetSymbolId = targetSymbolId,
                         Kind = typeInfo.Type.TypeKind == TypeKind.Interface ? EdgeKind.Implements : EdgeKind.Inherits,
                         RepositoryName = _repositoryName,
                         BranchName = _branchName,
@@ -307,10 +329,17 @@ public sealed class RoslynParserService
                 var symbolInfo = _semanticModel.GetSymbolInfo(invocation);
                 if (symbolInfo.Symbol != null)
                 {
+                    var qualifiedName = symbolInfo.Symbol.ToDisplayString();
+
+                    // Try to resolve to a symbol ID, otherwise use qualified name
+                    var targetSymbolId = _symbolLookup.TryGetValue(qualifiedName, out var symbolId)
+                        ? symbolId
+                        : qualifiedName;
+
                     var edge = new SymbolEdge
                     {
                         SourceSymbolId = sourceSymbolId,
-                        TargetSymbolId = symbolInfo.Symbol.ToDisplayString(),
+                        TargetSymbolId = targetSymbolId,
                         Kind = EdgeKind.Calls,
                         RepositoryName = _repositoryName,
                         BranchName = _branchName,
