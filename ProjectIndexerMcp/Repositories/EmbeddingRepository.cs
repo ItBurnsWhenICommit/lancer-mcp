@@ -97,7 +97,15 @@ public sealed class EmbeddingRepository : IEmbeddingRepository
             Limit = limit
         }, cancellationToken);
 
-        return results.Select(r => (MapToEmbedding(r), (float)r.distance));
+        var resultList = new List<(Embedding, float)>();
+        foreach (var r in results)
+        {
+            var embedding = MapToEmbedding(r);
+            var distance = (float)r.distance;
+            resultList.Add((embedding, distance));
+        }
+
+        return resultList;
     }
 
     public async Task<IEnumerable<(string ChunkId, float Score, float? BM25Score, float? VectorScore)>> HybridSearchAsync(
@@ -229,7 +237,8 @@ public sealed class EmbeddingRepository : IEmbeddingRepository
     public async Task<int> GetCountAsync(string repoId, CancellationToken cancellationToken = default)
     {
         const string sql = "SELECT COUNT(*) FROM embeddings WHERE repo_id = @RepoId";
-        return await _db.ExecuteScalarAsync<int>(sql, new { RepoId = repoId }, cancellationToken) ?? 0;
+        var count = await _db.ExecuteScalarAsync<int?>(sql, new { RepoId = repoId }, cancellationToken);
+        return count ?? 0;
     }
 
     public async Task<bool> ExistsForChunkAsync(string chunkId, CancellationToken cancellationToken = default)

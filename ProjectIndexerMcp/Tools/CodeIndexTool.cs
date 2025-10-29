@@ -14,15 +14,18 @@ public sealed class CodeIndexTool
 {
     private readonly GitTrackerService _gitTracker;
     private readonly IndexingService _indexingService;
+    private readonly QueryOrchestrator _queryOrchestrator;
     private readonly ILogger<CodeIndexTool> _logger;
 
     public CodeIndexTool(
         GitTrackerService gitTracker,
         IndexingService indexingService,
+        QueryOrchestrator queryOrchestrator,
         ILogger<CodeIndexTool> logger)
     {
         _gitTracker = gitTracker;
         _indexingService = indexingService;
+        _queryOrchestrator = queryOrchestrator;
         _logger = logger;
     }
 
@@ -98,40 +101,51 @@ public sealed class CodeIndexTool
                 }
             }
 
-            // TODO: Step 4-7 will implement the full query orchestration:
-            // 1. Intent detection (search vs navigation vs relations)
-            // 2. Query parsing and expansion
-            // 3. Hybrid search (BM25 + vector + graph)
-            // 4. Result ranking and context packaging
-            // 5. Return formatted results
+            // Execute query using QueryOrchestrator
+            var queryResponse = await _queryOrchestrator.QueryAsync(
+                query: query,
+                repositoryName: repository,
+                branchName: targetBranch,
+                language: null,
+                maxResults: maxResults ?? 50,
+                cancellationToken: cancellationToken);
 
-            // For now (Step 3), we parse and extract symbols but don't store them yet
+            // Format results for LLM consumption
             var result = new
             {
-                query,
+                query = queryResponse.Query,
+                intent = queryResponse.Intent.ToString(),
                 repository,
                 branch = targetBranch,
-                status = "step_3_complete",
-                message = "Parsing and symbol extraction implemented. Storage and search coming in Steps 4-7.",
-                note = "Step 3 complete: Multi-language parsing with Roslyn (C#) and regex-based parsing (Python, JS, Java, Go, Rust). Next: PostgreSQL storage.",
-                repositoryInfo = new
+                totalResults = queryResponse.TotalResults,
+                executionTimeMs = queryResponse.ExecutionTimeMs,
+                results = queryResponse.Results.Select(r => new
                 {
-                    name = repoState.Name,
-                    remoteUrl = repoState.RemoteUrl,
-                    defaultBranch = repoState.DefaultBranch,
-                    isCloned = repoState.IsCloned,
-                    lastUpdated = repoState.LastUpdated,
-                    trackedBranches = repoState.Branches.Select(b => new
+                    type = r.Type,
+                    filePath = r.FilePath,
+                    language = r.Language.ToString(),
+                    symbolName = r.SymbolName,
+                    symbolKind = r.SymbolKind?.ToString(),
+                    content = r.Content,
+                    startLine = r.StartLine,
+                    endLine = r.EndLine,
+                    score = r.Score,
+                    bm25Score = r.BM25Score,
+                    vectorScore = r.VectorScore,
+                    graphScore = r.GraphScore,
+                    signature = r.Signature,
+                    documentation = r.Documentation,
+                    relatedSymbols = r.RelatedSymbols?.Select(rs => new
                     {
-                        name = b.Value.Name,
-                        currentSha = b.Value.CurrentSha,
-                        lastIndexedSha = b.Value.LastIndexedSha,
-                        lastIndexed = b.Value.LastIndexed,
-                        lastAccessed = b.Value.LastAccessed,
-                        needsIndexing = b.Value.NeedsIndexing,
-                        isQueried = b.Key.Equals(targetBranch, StringComparison.OrdinalIgnoreCase)
+                        name = rs.Name,
+                        kind = rs.Kind.ToString(),
+                        relationType = rs.RelationType,
+                        filePath = rs.FilePath,
+                        line = rs.Line
                     }).ToArray()
-                }
+                }).ToArray(),
+                suggestedQueries = queryResponse.SuggestedQueries,
+                metadata = queryResponse.Metadata
             };
 
             return JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });

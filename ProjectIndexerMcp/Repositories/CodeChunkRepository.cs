@@ -240,7 +240,8 @@ public sealed class CodeChunkRepository : ICodeChunkRepository
     public async Task<int> GetCountAsync(string repoId, CancellationToken cancellationToken = default)
     {
         const string sql = "SELECT COUNT(*) FROM code_chunks WHERE repo_id = @RepoId";
-        return await _db.ExecuteScalarAsync<int>(sql, new { RepoId = repoId }, cancellationToken) ?? 0;
+        var count = await _db.ExecuteScalarAsync<int?>(sql, new { RepoId = repoId }, cancellationToken);
+        return count ?? 0;
     }
 }
 

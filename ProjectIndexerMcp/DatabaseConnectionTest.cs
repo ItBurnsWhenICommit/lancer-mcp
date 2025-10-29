@@ -75,9 +75,13 @@ public static class DatabaseConnectionTest
 
             // Test 5: Update the repository
             logger.LogInformation("Test 5: Updating the repository...");
-            var updatedRepo = retrievedRepo! with
+            var updatedRepo = new Repository
             {
+                Id = retrievedRepo!.Id,
+                Name = retrievedRepo.Name,
+                RemoteUrl = retrievedRepo.RemoteUrl,
                 DefaultBranch = "develop",
+                CreatedAt = retrievedRepo.CreatedAt,
                 UpdatedAt = DateTimeOffset.UtcNow
             };
             var result = await repoRepository.UpdateAsync(updatedRepo);

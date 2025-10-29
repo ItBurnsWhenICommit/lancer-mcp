@@ -61,6 +61,7 @@ builder.Services.AddSingleton<LanguageDetectionService>();
 builder.Services.AddSingleton<RoslynParserService>();
 builder.Services.AddSingleton<BasicParserService>();
 builder.Services.AddSingleton<ChunkingService>();
+builder.Services.AddSingleton<QueryOrchestrator>();
 
 // Configure HttpClient for EmbeddingService with proper BaseAddress and Timeout
 builder.Services.AddHttpClient<EmbeddingService>((serviceProvider, client) =>

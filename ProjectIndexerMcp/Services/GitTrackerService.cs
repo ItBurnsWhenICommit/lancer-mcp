@@ -3,6 +3,8 @@ using LibGit2Sharp;
 using Microsoft.Extensions.Options;
 using ProjectIndexerMcp.Configuration;
 using ProjectIndexerMcp.Models;
+using GitRepository = LibGit2Sharp.Repository;
+using GitCommit = LibGit2Sharp.Commit;
 
 namespace ProjectIndexerMcp.Services;
 
@@ -91,7 +93,7 @@ public sealed class GitTrackerService : IDisposable
             if (state.IsCloned)
                 return;
 
-            if (!Directory.Exists(state.LocalPath) || !Repository.IsValid(state.LocalPath))
+            if (!Directory.Exists(state.LocalPath) || !GitRepository.IsValid(state.LocalPath))
             {
                 _logger.LogInformation("Cloning repository {Name} from {Url} to {Path}", state.Name, state.RemoteUrl, state.LocalPath);
 
@@ -114,7 +116,7 @@ public sealed class GitTrackerService : IDisposable
                 // Configure SSH credentials for cloning
                 cloneOptions.FetchOptions.CredentialsProvider = CreateCredentialsProvider;
 
-                await Task.Run(() => Repository.Clone(state.RemoteUrl, state.LocalPath, cloneOptions), cancellationToken);
+                await Task.Run(() => GitRepository.Clone(state.RemoteUrl, state.LocalPath, cloneOptions), cancellationToken);
 
                 _logger.LogInformation("Successfully cloned repository {Name}", state.Name);
             }
@@ -158,7 +160,7 @@ public sealed class GitTrackerService : IDisposable
     /// </summary>
     private async Task<BranchState> UpdateBranchInternalAsync(RepositoryState repoState, string branchName, CancellationToken cancellationToken)
     {
-        using var repo = new Repository(repoState.LocalPath);
+        using var repo = new GitRepository(repoState.LocalPath);
 
         // Fetch latest changes
         _logger.LogInformation("Fetching updates for repository {Name}", repoState.Name);
@@ -251,10 +253,10 @@ public sealed class GitTrackerService : IDisposable
 
     private List<FileChange> GetFileChangesCore(RepositoryState repoState, BranchState branchState)
     {
-        using var repo = new Repository(repoState.LocalPath);
+        using var repo = new GitRepository(repoState.LocalPath);
         var changes = new List<FileChange>();
 
-        var currentCommit = repo.Lookup<Commit>(branchState.CurrentSha!);
+        var currentCommit = repo.Lookup<GitCommit>(branchState.CurrentSha!);
         if (currentCommit == null)
         {
             _logger.LogWarning("Current commit {Sha} not found in repository {Repo}",
@@ -262,10 +264,10 @@ public sealed class GitTrackerService : IDisposable
             return changes;
         }
 
-        Commit? lastIndexedCommit = null;
+        GitCommit? lastIndexedCommit = null;
         if (!string.IsNullOrEmpty(branchState.LastIndexedSha))
         {
-            lastIndexedCommit = repo.Lookup<Commit>(branchState.LastIndexedSha);
+            lastIndexedCommit = repo.Lookup<GitCommit>(branchState.LastIndexedSha);
         }
 
         // If no previous index, get all files from current commit (recursively)
@@ -352,7 +354,7 @@ public sealed class GitTrackerService : IDisposable
 
         return await Task.Run(() =>
         {
-            using var repo = new Repository(repoState.LocalPath);
+            using var repo = new GitRepository(repoState.LocalPath);
 
             // Get all remote branches (origin/*)
             return repo.Branches
@@ -374,7 +376,7 @@ public sealed class GitTrackerService : IDisposable
 
         return await Task.Run(() =>
         {
-            using var repo = new Repository(repoState.LocalPath);
+            using var repo = new GitRepository(repoState.LocalPath);
             var remoteBranchName = $"origin/{branchName}";
             return repo.Branches[remoteBranchName] is not null;
         }, cancellationToken);
@@ -480,10 +482,10 @@ public sealed class GitTrackerService : IDisposable
 
         return await Task.Run(() =>
         {
-            using var repo = new Repository(repoState.LocalPath);
+            using var repo = new GitRepository(repoState.LocalPath);
 
             // Look up the commit
-            var commit = repo.Lookup<Commit>(commitSha);
+            var commit = repo.Lookup<GitCommit>(commitSha);
             if (commit == null)
             {
                 _logger.LogWarning("Commit {Sha} not found in repository {Repo}", commitSha, repositoryName);
