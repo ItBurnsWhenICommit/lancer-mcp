@@ -1,0 +1,174 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  integration-tests:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for Git operations
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Install pgvector extension
+        run: |
+          # Install pgvector in the GitHub Actions PostgreSQL service
+          docker exec ${{ job.services.postgres.id }} sh -c "
+            apt-get update && 
+            apt-get install -y postgresql-16-pgvector
+          "
+
+      - name: Initialize database schema
+        run: |
+          # Create test database
+          PGPASSWORD=postgres psql -h localhost -U postgres -c "CREATE DATABASE project_indexer_test;"
+          
+          # Run migrations
+          PGPASSWORD=postgres psql -h localhost -U postgres -d project_indexer_test < database/schema/00_extensions.sql
+          PGPASSWORD=postgres psql -h localhost -U postgres -d project_indexer_test < database/schema/01_enums.sql
+          PGPASSWORD=postgres psql -h localhost -U postgres -d project_indexer_test < database/schema/02_tables.sql
+          PGPASSWORD=postgres psql -h localhost -U postgres -d project_indexer_test < database/schema/03_chunks_embeddings.sql
+          PGPASSWORD=postgres psql -h localhost -U postgres -d project_indexer_test < database/schema/04_functions.sql
+          PGPASSWORD=postgres psql -h localhost -U postgres -d project_indexer_test < database/schema/05_materialized_views.sql
+
+      - name: Check for cached fixtures
+        id: cache-fixtures
+        uses: actions/cache@v4
+        with:
+          path: tests/fixtures/dumps/project_indexer_latest.dump
+          key: fixtures-${{ hashFiles('database/schema/**', 'ProjectIndexerMcp/Services/**') }}
+          restore-keys: |
+            fixtures-
+
+      - name: Clone Git mirrors (if not cached)
+        if: steps.cache-fixtures.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p tests/fixtures/repos
+          
+          # Clone this repo as a mirror
+          git clone --mirror https://github.com/ItBurnsWhenICommit/project-indexer-mcp.git \
+            tests/fixtures/repos/project-indexer-mcp.git
+          
+          # Clone Pulsar4x as a mirror (optional, comment out if too large for CI)
+          # git clone --mirror https://github.com/Pulsar4xDevs/Pulsar4x.git \
+          #   tests/fixtures/repos/Pulsar4x.git
+
+      - name: Build MCP server (if not cached)
+        if: steps.cache-fixtures.outputs.cache-hit != 'true'
+        run: |
+          dotnet build ProjectIndexerMcp/ProjectIndexerMcp.csproj -c Release
+
+      - name: Generate fixtures (if not cached)
+        if: steps.cache-fixtures.outputs.cache-hit != 'true'
+        run: |
+          # TODO: This step requires running the MCP server and indexing repositories
+          # For now, we'll skip this and use a pre-generated fixture
+          # In a real CI setup, you would:
+          # 1. Start the MCP server in the background
+          # 2. Use an MCP client to add repositories
+          # 3. Wait for indexing to complete
+          # 4. Create the database dump
+          
+          echo "Fixture generation in CI is not yet implemented"
+          echo "For now, integration tests will be skipped if fixtures are not cached"
+          exit 0
+
+      - name: Restore fixtures
+        if: steps.cache-fixtures.outputs.cache-hit == 'true'
+        run: |
+          # Restore database dump
+          PGPASSWORD=postgres pg_restore -h localhost -U postgres -d project_indexer_test \
+            --no-owner --no-acl tests/fixtures/dumps/project_indexer_latest.dump || true
+          
+          # Verify data was restored
+          symbol_count=$(PGPASSWORD=postgres psql -h localhost -U postgres -d project_indexer_test -t -c "SELECT COUNT(*) FROM symbols;")
+          echo "Restored $symbol_count symbols"
+          
+          if [ "$symbol_count" -eq 0 ]; then
+            echo "No symbols found in restored database"
+            exit 1
+          fi
+
+      - name: Set up test environment
+        if: steps.cache-fixtures.outputs.cache-hit == 'true'
+        run: |
+          # Create test working directory
+          TEST_WORKING_DIR=/tmp/project-indexer-test-${{ github.run_id }}
+          mkdir -p $TEST_WORKING_DIR
+          
+          # Copy Git mirrors
+          cp -r tests/fixtures/repos/*.git $TEST_WORKING_DIR/ || true
+          
+          # Export environment variables for tests
+          echo "TEST_DB_NAME=project_indexer_test" >> $GITHUB_ENV
+          echo "TEST_WORKING_DIR=$TEST_WORKING_DIR" >> $GITHUB_ENV
+          echo "DB_HOST=localhost" >> $GITHUB_ENV
+          echo "DB_PORT=5432" >> $GITHUB_ENV
+          echo "DB_USER=postgres" >> $GITHUB_ENV
+          echo "DB_PASSWORD=postgres" >> $GITHUB_ENV
+
+      - name: Run integration tests
+        if: steps.cache-fixtures.outputs.cache-hit == 'true'
+        run: |
+          dotnet test tests/ProjectIndexerMcp.IntegrationTests \
+            --filter Category=Integration \
+            --logger "trx;LogFileName=integration-test-results.trx" \
+            --logger "console;verbosity=detailed" \
+            --collect:"XPlat Code Coverage"
+
+      - name: Upload test results
+        if: always() && steps.cache-fixtures.outputs.cache-hit == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results
+          path: |
+            **/integration-test-results.trx
+            **/coverage.cobertura.xml
+
+      - name: Publish test results
+        if: always() && steps.cache-fixtures.outputs.cache-hit == 'true'
+        uses: dorny/test-reporter@v1
+        with:
+          name: Integration Test Results
+          path: '**/integration-test-results.trx'
+          reporter: dotnet-trx
+          fail-on-error: true
+
+      - name: Skip tests (no fixtures)
+        if: steps.cache-fixtures.outputs.cache-hit != 'true'
+        run: |
+          echo "::warning::Integration tests skipped - fixtures not available"
+          echo "To generate fixtures, run scripts/refresh-fixtures.sh locally and commit the dump"
+

@@ -335,6 +335,13 @@ public sealed class GitTrackerService : IDisposable
         return changes;
     }
 
+    /// <summary>
+    /// Backwards-compatible alias for <see cref="MarkBranchAsIndexed"/> to avoid breaking existing callers/tests.
+    /// </summary>
+    public void MarkBranchIndexed(string repositoryName, string branchName)
+    {
+        MarkBranchAsIndexed(repositoryName, branchName);
+    }
 
 
     /// <summary>
@@ -531,4 +538,3 @@ public sealed class GitTrackerService : IDisposable
         _disposed = true;
     }
 }
-
