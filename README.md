@@ -1,21 +1,24 @@
 # Project Indexer MCP
 
-A self-hosted MCP (Model Context Protocol) server that indexes large repositories, tracks branches, and provides intelligent code search and navigation for LLMs.
+A self-hosted MCP (Model Context Protocol) server that indexes Git repositories and provides intelligent code search for AI agents using hybrid search (BM25 + vector embeddings + graph traversal).
 
 ## 🎯 What is this?
 
 This is a **LAN-hosted MCP server** written in C#/.NET that:
-- Clones and tracks Git repositories (main/master/trunk + arbitrary branches)
-- Scales to large monorepos and multi-language codebases
-- Will provide hybrid search (BM25 + vector + graph-aware ranking)
-- Exposes MCP tools for AI agents to query code intelligently
+- Clones and tracks Git repositories with incremental indexing
+- Parses code using Roslyn (C#) and regex-based parsers (Python, JS, Java, Go, Rust)
+- Generates code embeddings using jina-embeddings-v2-base-code
+- Stores data in PostgreSQL with pgvector for vector similarity search
+- Provides hybrid search combining BM25 full-text + vector semantic search + graph re-ranking
+- Exposes a single `Query` MCP tool for AI agents (Faster than multi-tool solutions)
 - Self-hosted alternative to cloud-based code indexing services
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 - .NET 9.0 SDK
-- Git installed on your system
+- Docker and Docker Compose
+- Git (And access to repos you index)
 
 ### 1. Clone and Build
 
@@ -25,36 +28,70 @@ cd project-indexer-mcp
 dotnet build ProjectIndexerMcp/ProjectIndexerMcp.csproj
 ```
 
-### 2. Configure
-
-Copy the example configuration:
+### 2. Start Database
 
 ```bash
-cp appsettings.example.json ProjectIndexerMcp/appsettings.json
+cd database
+docker compose up -d
+./test_setup.sh  # Verify database is ready
+cd ..
 ```
 
-Edit `ProjectIndexerMcp/appsettings.json` to add your repositories.
+### 3. Start Embedding Service (Optional but Recommended)
 
-### 3. Run
+```bash
+# CPU mode (slower but works without GPU)
+model=jinaai/jina-embeddings-v2-base-code
+volume=$PWD/embedding-data
+
+docker run -d --name text-embeddings -p 8080:80 \
+  -v $volume:/data \
+  ghcr.io/huggingface/text-embeddings-inference:cpu-1.8 \
+  --model-id $model
+```
+
+For GPU mode, see [docs/EMBEDDING_SETUP.md](docs/EMBEDDING_SETUP.md).
+
+### 4. Configure
+
+Edit `ProjectIndexerMcp/appsettings.json` to add your repositories:
+
+```json
+{
+  "Repositories": [
+    {
+      "Name": "my-project",
+      "RemoteUrl": "git@github.com:user/repo.git",
+      "DefaultBranch": "main"
+    }
+  ]
+}
+```
+
+### 5. Run
 
 ```bash
 dotnet run --project ProjectIndexerMcp/ProjectIndexerMcp.csproj
 ```
 
-The server will start on `http://localhost:5171` and automatically clone/track configured repositories.
+The server will:
+1. Clone configured repositories
+2. Parse code and extract symbols
+3. Generate embeddings (if embedding service is running)
+4. Store data in PostgreSQL
+5. Start MCP server on `http://localhost:5171`
 
-## 📚 Current Features (Steps 1, 2 & 3 Complete)
+## ✅ Features
 
-### ✅ Git Repository Tracking
+### Git Repository Tracking
 - Automatic cloning of configured repositories
 - Efficient bare repository storage
 - Default branch tracking (main/master/trunk)
-- On-demand arbitrary branch tracking
 - Incremental change detection (per-branch SHA cursors)
 - Thread-safe concurrent operations
 
-### ✅ Multi-Language Parsing & Symbol Extraction
-- **C# (Roslyn)**: Precise parsing with full semantic analysis
+### Multi-Language Code Parsing
+- **C# (Roslyn)**: Full semantic analysis
   - Classes, interfaces, structs, enums
   - Methods, constructors, properties, fields
   - Inheritance and interface implementation tracking
@@ -63,30 +100,52 @@ The server will start on `http://localhost:5171` and automatically clone/track c
   - Classes/structs and functions/methods
   - Function signatures
   - Basic symbol extraction
-- **Language Detection**: Automatic detection via file extension and shebang
-- **Concurrent Processing**: Configurable file read concurrency
 
-### ✅ MCP Tools
+### AST-Aware Chunking
+- Chunks at function/class granularity
+- 5 lines of context overlap (~30-60 tokens)
+- Respects 8k token limit for embedding model
+- Stores both symbol and chunk boundaries
 
-- `Query` - Unified query interface for code search and navigation (triggers on-demand indexing)
+### Code Embeddings
+- Uses jina-embeddings-v2-base-code (768 dimensions)
+- Batch processing for efficiency
+- Configurable timeout and batch size
+- CPU and GPU modes supported
+
+### PostgreSQL Storage
+- Full-text search with BM25 ranking
+- Vector similarity search using pgvector with HNSW indexes
+- Graph traversal for code relationships
+- Materialized views for analytics
+- 30+ optimized indexes
+
+### Hybrid Search
+- Combines BM25 full-text search + vector semantic search
+- Graph re-ranking based on symbol relationships
+- Configurable weights for BM25 vs vector
+- Intent detection (navigation, relations, documentation, examples)
+
+### MCP Tools
+- `Query` - Unified query interface for code search and navigation
 
 ## 🗺️ Roadmap
 
 - [x] **Step 1**: MCP server bootstrap with HTTP transport
 - [x] **Step 2**: Git tracker (clone, fetch, branch tracking, incremental diffs)
-- [x] **Step 3**: Multi-language parsing & symbol extraction (Roslyn for C#, regex-based for others)
-- [ ] **Step 4**: PostgreSQL + pgvector storage
-- [ ] **Step 5**: Embedding generation (code-aware models)
-- [ ] **Step 6**: Hybrid search & query orchestrator
-- [ ] **Step 7**: Enhanced query capabilities (semantic search, call graphs, etc.)
-- [ ] **Step 8**: Background indexing pipeline
+- [x] **Step 3**: Multi-language parsing & symbol extraction
+- [x] **Step 4**: PostgreSQL + pgvector storage
+- [x] **Step 5**: Embedding generation with jina-embeddings-v2-base-code
+- [x] **Step 6**: Hybrid search & query orchestrator
+- [ ] **Step 7**: Enhanced query capabilities (call graphs, recent changes)
+- [ ] **Step 8**: Performance optimization and caching
 
 ## 🔧 Architecture
 
-### Indexing Pipeline (Step 3)
+### Indexing Pipeline
 
 ```
-File Change Detection (GitTrackerService)
+Git Change Detection (GitTrackerService)
     ↓
 Language Detection (by extension + shebang)
     ↓
@@ -96,7 +155,30 @@ Parser Selection
     ↓
 Symbol & Edge Extraction
     ↓
-In-Memory Storage (Step 4 will add PostgreSQL)
+AST-Aware Chunking (ChunkingService)
+    ↓
+Embedding Generation (EmbeddingService)
+    ↓
+PostgreSQL Storage (Dapper)
+```
+
+### Query Pipeline
+
+```
+User Query (MCP Tool)
+    ↓
+Intent Detection (QueryOrchestrator)
+    ↓
+Hybrid Search
+    ├─→ BM25 Full-Text Search
+    ├─→ Vector Similarity Search (pgvector)
+    └─→ Graph Traversal (symbol relationships)
+    ↓
+Result Ranking & Merging
+    ↓
+Context Packaging
+    ↓
+Return to AI Agent
 ```
 
 ### Supported Languages
@@ -110,22 +192,69 @@ In-Memory Storage (Step 4 will add PostgreSQL)
 | Go | Regex | Structs, functions |
 | Rust | Regex | Structs, functions |
 
-**Note**: Tree-sitter integration planned for future enhancement to improve parsing accuracy for non-C# languages.
+**Note**: Tree-sitter integration planned for future enhancement.
 
 ## 📖 Documentation
 
+### Setup Guides
+- [Database Setup](database/README.md) - PostgreSQL with pgvector
+- [Embedding Service Setup](docs/EMBEDDING_SETUP.md) - Text Embeddings Inference
+- [Storage Layer Setup](docs/STORAGE_LAYER_SETUP.md) - Connecting to PostgreSQL
+
+### Architecture & Design
+- [Architecture Overview](docs/ARCHITECTURE.md) - System design and MCP tool philosophy
+- [Query Orchestration](docs/QUERY_ORCHESTRATION_GUIDE.md) - Hybrid search implementation
+
+### Testing
+- [Testing Strategy](docs/TESTING_STRATEGY.md) - Fixture-based integration testing
+- [Unit Tests](ProjectIndexerMcp.Tests/README.md) - Running unit tests
+- [Integration Tests](tests/ProjectIndexerMcp.IntegrationTests/README.md) - Running integration tests
+
+### Reference
+- [Database Quick Reference](database/QUICK_REFERENCE.md) - Common SQL queries
 - [LICENSE](LICENSE) - MIT License
 
 ## 🧪 Testing
 
-Run all tests:
+### Unit Tests
 ```bash
-dotnet test
+dotnet test ProjectIndexerMcp.Tests
 ```
 
-Run specific test suite:
+### Integration Tests
 ```bash
-dotnet test --filter "FullyQualifiedName~IndexingServiceTests"
+# Generate fixtures (first time only)
+./scripts/refresh-fixtures.sh
+
+# Restore fixtures and run tests
+./scripts/restore-fixtures.sh
+export TEST_DB_NAME=project_indexer_test
+export TEST_WORKING_DIR=/tmp/project-indexer-test-XXXXXX
+dotnet test tests/ProjectIndexerMcp.IntegrationTests --filter Category=Integration
+```
+
+See [Testing Strategy](docs/TESTING_STRATEGY.md) for details.
+
+## 🛠️ Configuration
+
+Key settings in `appsettings.json`:
+
+```json
+{
+  "Repositories": [
+    {
+      "Name": "my-project",
+      "RemoteUrl": "git@github.com:user/repo.git",
+      "DefaultBranch": "main"
+    }
+  ],
+  "DatabaseHost": "localhost",
+  "DatabasePort": 5432,
+  "DatabaseName": "project_indexer",
+  "EmbeddingServiceUrl": "http://localhost:8080",
+  "EmbeddingBatchSize": 16,
+  "EmbeddingTimeoutSeconds": 300
+}
 ```
 
 ## 🙏 Acknowledgments
@@ -133,4 +262,10 @@ dotnet test --filter "FullyQualifiedName~IndexingServiceTests"
 Built with:
 - [ModelContextProtocol.AspNetCore](https://github.com/modelcontextprotocol/csharp-sdk) - MCP C# SDK
 - [LibGit2Sharp](https://github.com/libgit2/libgit2sharp) - Git operations
+- [Roslyn](https://github.com/dotnet/roslyn) - C# semantic analysis
+- [Dapper](https://github.com/DapperLib/Dapper) - Lightweight ORM
+- [PostgreSQL](https://www.postgresql.org/) - Database
+- [pgvector](https://github.com/pgvector/pgvector) - Vector similarity search
+- [Text Embeddings Inference](https://github.com/huggingface/text-embeddings-inference) - Embedding service
+- [jina-embeddings-v2-base-code](https://huggingface.co/jinaai/jina-embeddings-v2-base-code) - Code embedding model
 - [.NET 9.0](https://dotnet.microsoft.com/) - Runtime and SDK
