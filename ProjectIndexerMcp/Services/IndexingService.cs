@@ -18,6 +18,7 @@ public sealed class IndexingService
     private readonly BasicParserService _basicParser;
     private readonly ChunkingService _chunkingService;
     private readonly EmbeddingService _embeddingService;
+    private readonly IRepositoryRepository _repositoryRepository;
     private readonly ICommitRepository _commitRepository;
     private readonly IFileRepository _fileRepository;
     private readonly ISymbolRepository _symbolRepository;
@@ -35,6 +36,7 @@ public sealed class IndexingService
         BasicParserService basicParser,
         ChunkingService chunkingService,
         EmbeddingService embeddingService,
+        IRepositoryRepository repositoryRepository,
         ICommitRepository commitRepository,
         IFileRepository fileRepository,
         ISymbolRepository symbolRepository,
@@ -50,6 +52,7 @@ public sealed class IndexingService
         _basicParser = basicParser;
         _chunkingService = chunkingService;
         _embeddingService = embeddingService;
+        _repositoryRepository = repositoryRepository;
         _commitRepository = commitRepository;
         _fileRepository = fileRepository;
         _symbolRepository = symbolRepository;
@@ -226,7 +229,14 @@ public sealed class IndexingService
 
         try
         {
-            // Step 1: Persist commits (deduplicated)
+            // Step 0: Ensure repositories exist in the database
+            var repositoryNames = parsedFiles.Select(f => f.RepositoryName).Distinct().ToList();
+            foreach (var repoName in repositoryNames)
+            {
+                await EnsureRepositoryExistsAsync(repoName, cancellationToken);
+            }
+
+            // Step 1: Persist commits
             var commits = parsedFiles
                 .GroupBy(f => new { f.RepositoryName, f.BranchName, f.CommitSha })
                 .Select(g => new Commit
@@ -314,6 +324,48 @@ public sealed class IndexingService
             _logger.LogError(ex, "Failed to persist data to storage");
             throw;
         }
+    }
+
+    /// <summary>
+    /// Ensures a repository exists in the database, creating it if necessary.
+    /// </summary>
+    private async Task EnsureRepositoryExistsAsync(string repositoryName, CancellationToken cancellationToken)
+    {
+        // Check if repository already exists
+        var existingRepo = await _repositoryRepository.GetByNameAsync(repositoryName, cancellationToken);
+        if (existingRepo != null)
+        {
+            return; // Repository already exists
+        }
+
+        // Get repository configuration from options
+        var repoConfig = _options.CurrentValue.Repositories
+            .FirstOrDefault(r => r.Name == repositoryName);
+
+        if (repoConfig == null)
+        {
+            _logger.LogWarning("Repository {Name} not found in configuration, creating with minimal info", repositoryName);
+            repoConfig = new ServerOptions.RepositoryDescriptor
+            {
+                Name = repositoryName,
+                RemoteUrl = "unknown",
+                DefaultBranch = "main"
+            };
+        }
+
+        // Create repository record
+        var repository = new Repository
+        {
+            Id = repositoryName, // Use repository name as ID for consistency
+            Name = repositoryName,
+            RemoteUrl = repoConfig.RemoteUrl,
+            DefaultBranch = repoConfig.DefaultBranch,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+
+        await _repositoryRepository.CreateAsync(repository, cancellationToken);
+        _logger.LogInformation("Created repository record for {Name}", repositoryName);
     }
 }
 

@@ -33,6 +33,12 @@ public sealed class BranchCleanupHostedService : BackgroundService
         var nextMidnight = now.Date.AddDays(1);
         var initialDelay = nextMidnight - now;
 
+        // Ensure the delay is positive (in case of clock skew or if we're exactly at midnight)
+        if (initialDelay <= TimeSpan.Zero)
+        {
+            initialDelay = TimeSpan.FromMinutes(1); // Wait 1 minute if we're at or past midnight
+        }
+
         _logger.LogInformation("First cleanup scheduled for {NextRun} (in {Delay})", nextMidnight, initialDelay);
 
         try
