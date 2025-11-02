@@ -1,18 +1,16 @@
 #!/bin/bash
 # ============================================================================
-# Test Script for PostgreSQL Database Setup
+# Test Script for PostgreSQL Database Setup (Docker Version)
 # ============================================================================
-# This script verifies that the database is set up correctly
+# This script verifies that the database is set up correctly using Docker exec
 # ============================================================================
 
 set -e
 
 # Configuration
-DB_HOST="${DB_HOST:-localhost}"
-DB_PORT="${DB_PORT:-5432}"
+CONTAINER_NAME="${CONTAINER_NAME:-project-indexer-postgres}"
 DB_NAME="${DB_NAME:-project_indexer}"
 DB_USER="${DB_USER:-postgres}"
-DB_PASSWORD="${DB_PASSWORD:-postgres}"
 
 # Colors
 GREEN='\033[0;32m'
@@ -35,10 +33,10 @@ print_info() {
 run_test() {
     local test_name=$1
     local query=$2
-    
+
     echo -n "Testing $test_name... "
-    
-    if PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME -c "$query" > /dev/null 2>&1; then
+
+    if docker exec $CONTAINER_NAME psql -U $DB_USER -d $DB_NAME -c "$query" > /dev/null 2>&1; then
         print_success "$test_name"
         return 0
     else
@@ -48,17 +46,29 @@ run_test() {
 }
 
 echo "============================================================================"
-echo "PostgreSQL Database Setup Test"
+echo "PostgreSQL Database Setup Test (Docker)"
 echo "============================================================================"
+echo "Container: $CONTAINER_NAME"
 echo "Database: $DB_NAME"
-echo "Host: $DB_HOST:$DB_PORT"
 echo "User: $DB_USER"
 echo "============================================================================"
 echo ""
 
+# Test 0: Check if container is running
+print_info "Checking if Docker container is running..."
+if ! docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+    print_error "Container '$CONTAINER_NAME' is not running"
+    echo ""
+    echo "Please start the container with:"
+    echo "  cd database && docker compose up -d"
+    exit 1
+fi
+print_success "Container is running"
+echo ""
+
 # Test 1: Database connection
 print_info "Testing database connection..."
-if PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME -c '\q' 2>/dev/null; then
+if docker exec $CONTAINER_NAME psql -U $DB_USER -d $DB_NAME -c '\q' 2>/dev/null; then
     print_success "Database connection"
 else
     print_error "Database connection"
@@ -124,10 +134,10 @@ print_success "All tests passed! Database is set up correctly."
 echo "============================================================================"
 echo ""
 print_info "You can now:"
-echo "  1. Connect to the database: psql -h $DB_HOST -U $DB_USER -d $DB_NAME"
-echo "  2. View tables: \\dt"
-echo "  3. View materialized views: \\dm"
-echo "  4. View functions: \\df"
-echo "  5. Test search: SELECT * FROM search_chunks_fulltext('your query');"
+echo "  1. Connect to the database: docker exec -it $CONTAINER_NAME psql -U $DB_USER -d $DB_NAME"
+echo "  2. View tables: docker exec -it $CONTAINER_NAME psql -U $DB_USER -d $DB_NAME -c '\\dt'"
+echo "  3. View materialized views: docker exec -it $CONTAINER_NAME psql -U $DB_USER -d $DB_NAME -c '\\dm'"
+echo "  4. View functions: docker exec -it $CONTAINER_NAME psql -U $DB_USER -d $DB_NAME -c '\\df'"
+echo "  5. Test search: docker exec -it $CONTAINER_NAME psql -U $DB_USER -d $DB_NAME -c \"SELECT * FROM search_chunks_fulltext('your query');\""
 echo ""
 
