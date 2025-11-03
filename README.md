@@ -13,6 +13,17 @@ This is a **LAN-hosted MCP server** written in C#/.NET that:
 - Exposes a single `Query` MCP tool for AI agents (Faster than multi-tool solutions)
 - Self-hosted alternative to cloud-based code indexing services
 
+## 💡 Why This Was Made
+
+This project was born out of both curiosity and necessity.
+
+- **To learn the Model Context Protocol deeply** — I wanted to understand how MCP servers operate at a low level: tool schemas, context lifecycles, and performance trade-offs. Building a self-hosted implementation from scratch was the best way to gain that practical knowledge.  
+
+- **To build a fast, local, and intelligent system for personal LLMs** — I wanted a LAN-accessible platform that empowers personal LLMs to perform high-quality, contextually relevant code search — fast, private, and fully extensible — without depending on cloud-based or paid indexing services.  
+
+- **To push MCP performance beyond standard multi-tool setups** — Research such as [**LongFuncEval: Measuring the Effectiveness of Long Context Models for Function Calling** (IBM Research, 2025)](https://arxiv.org/abs/2505.10570), [**Less is More: Optimizing Function Calling for LLM Execution on Edge Devices** (arXiv 2411.15399, DATE 2025)](https://arxiv.org/abs/2411.15399), and the **OpenAI Cookbook — MCP Tool Guide (2025)** highlight that exposing models to large tool catalogs often leads to slower reasoning and reduced accuracy.  
+  Instead of reproducing those studies, this project focuses on achieving **maximum performance and reliability** through a **single unified `Query` MCP tool**, which internally orchestrates hybrid search and retrieval.
+
 ## 🚀 Quick Start
 
 ### Prerequisites
