@@ -120,10 +120,11 @@ public sealed class EmbeddingRepository : IEmbeddingRepository
     {
         const string sql = @"
             SELECT * FROM hybrid_search(
-                @RepoId,
-                @BranchName,
                 @QueryText,
                 @QueryVector::vector,
+                @RepoId,
+                @BranchName,
+                NULL,
                 @BM25Weight,
                 @VectorWeight,
                 @Limit
