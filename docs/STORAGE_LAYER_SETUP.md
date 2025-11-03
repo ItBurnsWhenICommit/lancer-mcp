@@ -267,11 +267,11 @@ The database includes:
 - `repo_stats` - Repository statistics
 - `branch_stats` - Branch statistics
 - `language_stats` - Language distribution
+- `symbol_kind_stats` - Symbol kind distribution
+- `edge_kind_stats` - Edge kind distribution
 - `hot_symbols` - Most referenced symbols
-- `symbol_complexity` - Symbol complexity metrics
-- `file_stats` - File statistics
-- `chunk_stats` - Code chunk statistics
-- `embedding_coverage` - Embedding coverage statistics
+- `recent_activity` - Recent commit activity
+- `indexing_progress` - Indexing progress per repository
 
 ## Troubleshooting
 
@@ -299,10 +299,10 @@ If you get permission errors:
 
 Now that the storage layer is set up, you can:
 
-1. **Update IndexingService** to persist parsed data to the database
-2. **Implement QueryOrchestrator** to use hybrid search for code queries
-3. **Add embedding generation** for code chunks
-4. **Create background jobs** to keep the index up-to-date
+1. **Monitor indexing progress** using the materialized views
+2. **Refresh statistics** periodically with `SELECT refresh_all_stats();`
+3. **Query the code index** using the MCP Query tool
+4. **Optimize performance** by tuning PostgreSQL settings for your workload
 
 See the main README for more information on the overall architecture.
 
