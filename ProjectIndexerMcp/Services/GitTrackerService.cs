@@ -89,7 +89,10 @@ public sealed class GitTrackerService : IDisposable
             await CloneOrOpenRepositoryAsync(state, cancellationToken);
 
             // Persist repository metadata to database
-            await EnsureRepositoryInDatabaseAsync(state, cancellationToken);
+            var repo = await EnsureRepositoryInDatabaseAsync(state, cancellationToken);
+
+            // Load existing branch state from database
+            await LoadBranchStateFromDatabaseAsync(state, repo.Id, cancellationToken);
         }
 
         return state;
@@ -215,7 +218,7 @@ public sealed class GitTrackerService : IDisposable
         }
 
         // Persist branch metadata to database
-        await EnsureBranchInDatabaseAsync(repoState.Name, branchName, currentSha, cancellationToken);
+        await EnsureBranchInDatabaseAsync(repoState, branchName, currentSha, cancellationToken);
 
         repoState.LastUpdated = DateTimeOffset.UtcNow;
         return branchState;
@@ -536,17 +539,13 @@ public sealed class GitTrackerService : IDisposable
     /// Creates or updates the branch record.
     /// </summary>
     private async Task<Models.Branch> EnsureBranchInDatabaseAsync(
-        string repositoryName,
+        RepositoryState repoState,
         string branchName,
         string headCommitSha,
         CancellationToken cancellationToken)
     {
-        // Get repository from database
-        var repo = await _repositoryRepository.GetByNameAsync(repositoryName, cancellationToken);
-        if (repo == null)
-        {
-            throw new InvalidOperationException($"Repository {repositoryName} not found in database");
-        }
+        // Ensure repository exists in database first
+        var repo = await EnsureRepositoryInDatabaseAsync(repoState, cancellationToken);
 
         // Check if branch already exists
         var existingBranch = await _branchRepository.GetByRepoAndNameAsync(repo.Id, branchName, cancellationToken);
@@ -587,7 +586,7 @@ public sealed class GitTrackerService : IDisposable
         };
 
         var createdBranch = await _branchRepository.CreateAsync(newBranch, cancellationToken);
-        _logger.LogInformation("Created branch {Branch} in database for repository {Repo}", branchName, repositoryName);
+        _logger.LogInformation("Created branch {Branch} in database for repository {Repo}", branchName, repoState.Name);
 
         return createdBranch;
     }
@@ -617,6 +616,55 @@ public sealed class GitTrackerService : IDisposable
 
         await _branchRepository.UpdateIndexStateAsync(branch.Id, IndexState.Completed, indexedCommitSha, cancellationToken);
         _logger.LogDebug("Updated branch {Branch} index state to Completed in database", branchName);
+    }
+
+    /// <summary>
+    /// Loads existing branch state from the database into in-memory state.
+    /// This allows the service to resume tracking branches after a restart.
+    /// </summary>
+    private async Task LoadBranchStateFromDatabaseAsync(
+        RepositoryState repoState,
+        string repoId,
+        CancellationToken cancellationToken)
+    {
+        var branches = await _branchRepository.GetByRepoIdAsync(repoId, cancellationToken);
+        var branchList = branches.ToList();
+
+        if (branchList.Count == 0)
+        {
+            _logger.LogDebug("No existing branches found in database for repository {Repo}", repoState.Name);
+            return;
+        }
+
+        foreach (var dbBranch in branchList)
+        {
+            // Only load branches that have been indexed (have IndexedCommitSha)
+            // Skip branches that are only Pending and have never been indexed
+            if (dbBranch.IndexedCommitSha == null && dbBranch.IndexState == IndexState.Pending)
+            {
+                _logger.LogDebug("Skipping pending branch {Branch} that has never been indexed", dbBranch.Name);
+                continue;
+            }
+
+            var branchState = new BranchState
+            {
+                Name = dbBranch.Name,
+                CurrentSha = dbBranch.HeadCommitSha,
+                LastIndexedSha = dbBranch.IndexedCommitSha,
+                LastIndexed = dbBranch.LastIndexedAt,
+                LastAccessed = DateTimeOffset.UtcNow // Set to now since we're loading on startup
+            };
+
+            repoState.Branches[dbBranch.Name] = branchState;
+            _logger.LogInformation(
+                "Loaded branch {Branch} from database: HEAD={HeadSha}, LastIndexed={IndexedSha}, State={State}",
+                dbBranch.Name,
+                dbBranch.HeadCommitSha[..7],
+                dbBranch.IndexedCommitSha?[..7] ?? "none",
+                dbBranch.IndexState);
+        }
+
+        _logger.LogInformation("Loaded {Count} branch(es) from database for repository {Repo}", repoState.Branches.Count, repoState.Name);
     }
 
     /// <summary>
