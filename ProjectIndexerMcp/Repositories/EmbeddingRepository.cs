@@ -22,7 +22,7 @@ public sealed class EmbeddingRepository : IEmbeddingRepository
     {
         const string sql = @"
             SELECT id, chunk_id AS ChunkId, repo_id AS RepositoryName, branch_name AS BranchName,
-                   commit_sha AS CommitSha, embedding::text AS Vector, model, model_version AS ModelVersion,
+                   commit_sha AS CommitSha, vector::text AS Vector, model, model_version AS ModelVersion,
                    generated_at AS GeneratedAt
             FROM embeddings
             WHERE id = @Id";
@@ -35,7 +35,7 @@ public sealed class EmbeddingRepository : IEmbeddingRepository
     {
         const string sql = @"
             SELECT id, chunk_id AS ChunkId, repo_id AS RepositoryName, branch_name AS BranchName,
-                   commit_sha AS CommitSha, embedding::text AS Vector, model, model_version AS ModelVersion,
+                   commit_sha AS CommitSha, vector::text AS Vector, model, model_version AS ModelVersion,
                    generated_at AS GeneratedAt
             FROM embeddings
             WHERE chunk_id = @ChunkId
@@ -49,7 +49,7 @@ public sealed class EmbeddingRepository : IEmbeddingRepository
     {
         const string sql = @"
             SELECT id, chunk_id AS ChunkId, repo_id AS RepositoryName, branch_name AS BranchName,
-                   commit_sha AS CommitSha, embedding::text AS Vector, model, model_version AS ModelVersion,
+                   commit_sha AS CommitSha, vector::text AS Vector, model, model_version AS ModelVersion,
                    generated_at AS GeneratedAt
             FROM embeddings
             WHERE repo_id = @RepoId AND branch_name = @BranchName
@@ -68,9 +68,9 @@ public sealed class EmbeddingRepository : IEmbeddingRepository
     {
         var sql = @"
             SELECT id, chunk_id AS ChunkId, repo_id AS RepositoryName, branch_name AS BranchName,
-                   commit_sha AS CommitSha, embedding::text AS Vector, model, model_version AS ModelVersion,
+                   commit_sha AS CommitSha, vector::text AS Vector, model, model_version AS ModelVersion,
                    generated_at AS GeneratedAt,
-                   embedding <=> @QueryVector::vector AS distance
+                   vector <=> @QueryVector::vector AS distance
             FROM embeddings
             WHERE 1=1";
 
@@ -85,7 +85,7 @@ public sealed class EmbeddingRepository : IEmbeddingRepository
         }
 
         sql += @"
-            ORDER BY embedding <=> @QueryVector::vector
+            ORDER BY vector <=> @QueryVector::vector
             LIMIT @Limit";
 
         var vector = new Vector(queryVector);
@@ -153,12 +153,12 @@ public sealed class EmbeddingRepository : IEmbeddingRepository
     public async Task<Embedding> CreateAsync(Embedding embedding, CancellationToken cancellationToken = default)
     {
         const string sql = @"
-            INSERT INTO embeddings (id, chunk_id, repo_id, branch_name, commit_sha, embedding,
+            INSERT INTO embeddings (id, chunk_id, repo_id, branch_name, commit_sha, vector,
                                     model, model_version, generated_at)
             VALUES (@Id, @ChunkId, @RepositoryName, @BranchName, @CommitSha, @Vector::vector,
                     @Model, @ModelVersion, @GeneratedAt)
             ON CONFLICT (chunk_id) DO UPDATE
-            SET embedding = EXCLUDED.embedding,
+            SET vector = EXCLUDED.vector,
                 model = EXCLUDED.model,
                 model_version = EXCLUDED.model_version,
                 generated_at = EXCLUDED.generated_at
@@ -184,12 +184,12 @@ public sealed class EmbeddingRepository : IEmbeddingRepository
     public async Task<int> CreateBatchAsync(IEnumerable<Embedding> embeddings, CancellationToken cancellationToken = default)
     {
         const string sql = @"
-            INSERT INTO embeddings (id, chunk_id, repo_id, branch_name, commit_sha, embedding,
+            INSERT INTO embeddings (id, chunk_id, repo_id, branch_name, commit_sha, vector,
                                     model, model_version, generated_at)
             VALUES (@Id, @ChunkId, @RepositoryName, @BranchName, @CommitSha, @Vector::vector,
                     @Model, @ModelVersion, @GeneratedAt)
             ON CONFLICT (chunk_id) DO UPDATE
-            SET embedding = EXCLUDED.embedding,
+            SET vector = EXCLUDED.vector,
                 model = EXCLUDED.model,
                 model_version = EXCLUDED.model_version,
                 generated_at = EXCLUDED.generated_at";
