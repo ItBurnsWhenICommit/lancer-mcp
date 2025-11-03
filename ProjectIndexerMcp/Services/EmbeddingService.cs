@@ -82,6 +82,34 @@ public sealed class EmbeddingService : IDisposable
 
             // Send request to TEI (using BaseAddress configured in DI)
             var response = await _httpClient.PostAsJsonAsync("/embed", request, cancellationToken);
+
+            // Handle 413 Payload Too Large by splitting the batch
+            if (response.StatusCode == System.Net.HttpStatusCode.RequestEntityTooLarge)
+            {
+                if (chunks.Count == 1)
+                {
+                    // Single chunk is too large, skip it
+                    _logger.LogWarning(
+                        "Chunk is too large for embedding service ({Size} chars), skipping: {ChunkId}",
+                        chunks[0].Content.Length, chunks[0].Id);
+                    return new List<Embedding>();
+                }
+
+                // Split batch in half and retry
+                _logger.LogWarning(
+                    "Batch of {Count} chunks too large (413), splitting into smaller batches",
+                    chunks.Count);
+
+                var mid = chunks.Count / 2;
+                var firstHalf = chunks.Take(mid).ToList();
+                var secondHalf = chunks.Skip(mid).ToList();
+
+                var splitEmbeddings = new List<Embedding>();
+                splitEmbeddings.AddRange(await GenerateBatchEmbeddingsAsync(firstHalf, cancellationToken));
+                splitEmbeddings.AddRange(await GenerateBatchEmbeddingsAsync(secondHalf, cancellationToken));
+                return splitEmbeddings;
+            }
+
             response.EnsureSuccessStatusCode();
 
             // Parse response
