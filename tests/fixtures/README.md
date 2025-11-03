@@ -2,12 +2,20 @@
 
 This directory contains pre-indexed test fixtures for integration testing.
 
+**⚠️ Important**: Fixtures are **not shipped with the repository** and must be generated locally using `scripts/refresh-fixtures.sh`. See the "Generating Fixtures" section below.
+
 ## Overview
 
 The test fixtures consist of:
 1. **Git mirrors** - Bare Git repositories used for testing
 2. **Database dumps** - PostgreSQL dumps with pre-indexed data
 3. **Metadata** - JSON files describing the fixture contents
+
+**Why not ship fixtures?**
+- Database dumps can be 100+ MB
+- Git mirrors can be 50+ MB
+- Keeps the repository lightweight
+- Ensures fixtures match your local environment
 
 ## Repositories
 
@@ -73,41 +81,51 @@ When the script prompts you, follow these steps:
    dotnet run --project ProjectIndexerMcp/ProjectIndexerMcp.csproj -c Release
    ```
 
-2. **Add repositories using MCP tools:**
-   
-   Use your MCP client (e.g., Claude Desktop, Cline) to call:
-   
+2. **Configure repositories in appsettings.json:**
+
+   Edit `ProjectIndexerMcp/appsettings.json` to add the fixture repositories:
+
    ```json
    {
-     "tool": "code_index.add_repository",
-     "arguments": {
-       "name": "project-indexer-mcp",
-       "url": "file:///path/to/tests/fixtures/repos/project-indexer-mcp.git",
-       "default_branch": "main"
-     }
-   }
-   ```
-   
-   ```json
-   {
-     "tool": "code_index.add_repository",
-     "arguments": {
-       "name": "Pulsar4x",
-       "url": "file:///path/to/tests/fixtures/repos/Pulsar4x.git",
-       "default_branch": "master"
-     }
+     "Repositories": [
+       {
+         "Name": "project-indexer-mcp",
+         "RemoteUrl": "file:///absolute/path/to/tests/fixtures/repos/project-indexer-mcp.git",
+         "DefaultBranch": "main"
+       },
+       {
+         "Name": "Pulsar4x",
+         "RemoteUrl": "file:///absolute/path/to/tests/fixtures/repos/Pulsar4x.git",
+         "DefaultBranch": "master"
+       }
+     ]
    }
    ```
 
-3. **Wait for indexing to complete**
-   
+   **Note**: Use absolute paths for the `RemoteUrl` field.
+
+3. **Start the MCP server:**
+
+   ```bash
+   dotnet run --project ProjectIndexerMcp/ProjectIndexerMcp.csproj -c Release
+   ```
+
+   The server will automatically:
+   - Clone the repositories
+   - Index the default branches
+   - Generate embeddings
+   - Store data in PostgreSQL
+
+4. **Wait for indexing to complete**
+
    Monitor the server logs for completion messages:
    ```
    [INFO] Indexed 1234 files from project-indexer-mcp/main
    [INFO] Generated 5678 embeddings
+   [INFO] Completed automatic indexing of default branches
    ```
 
-4. **Press ENTER in the script terminal** to continue with the database dump
+5. **Press ENTER in the script terminal** to continue with the database dump
 
 ## Using Fixtures in Tests
 

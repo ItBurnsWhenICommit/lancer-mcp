@@ -52,7 +52,7 @@ mkdir -p "$REPOS_DIR"
 for repo_url in "${REPOS[@]}"; do
     repo_name=$(basename "$repo_url" .git)
     mirror_path="$REPOS_DIR/${repo_name}.git"
-    
+
     if [ -d "$mirror_path" ]; then
         log_info "Updating existing mirror: $repo_name"
         cd "$mirror_path"
@@ -76,7 +76,7 @@ else
     docker compose up -d
     log_info "Waiting for PostgreSQL to be ready..."
     sleep 5
-    
+
     # Wait for PostgreSQL to accept connections
     for i in {1..30}; do
         if docker compose exec -T postgres pg_isready -U "$DB_USER" > /dev/null 2>&1; then
@@ -115,14 +115,30 @@ log_info "Step 4: Building MCP server..."
 cd "$PROJECT_ROOT"
 dotnet build ProjectIndexerMcp/ProjectIndexerMcp.csproj -c Release
 
-log_info "Step 5: Indexing repositories..."
+log_info "Step 5: Configuring and indexing repositories..."
 log_warn "NOTE: This step requires manual intervention:"
-log_warn "1. Start the MCP server: dotnet run --project ProjectIndexerMcp/ProjectIndexerMcp.csproj -c Release"
-log_warn "2. Use the code_index.add_repository tool to add repositories:"
-log_warn "   - project-indexer-mcp: $REPOS_DIR/project-indexer-mcp.git"
-log_warn "   - Pulsar4x: $REPOS_DIR/Pulsar4x.git"
-log_warn "3. Wait for indexing to complete (check logs)"
-log_warn "4. Press ENTER to continue with database dump..."
+log_warn "1. Configure repositories in ProjectIndexerMcp/appsettings.json:"
+log_warn ""
+log_warn "   \"Repositories\": ["
+log_warn "     {"
+log_warn "       \"Name\": \"project-indexer-mcp\","
+log_warn "       \"RemoteUrl\": \"file://$REPOS_DIR/project-indexer-mcp.git\","
+log_warn "       \"DefaultBranch\": \"main\""
+log_warn "     },"
+log_warn "     {"
+log_warn "       \"Name\": \"Pulsar4x\","
+log_warn "       \"RemoteUrl\": \"file://$REPOS_DIR/Pulsar4x.git\","
+log_warn "       \"DefaultBranch\": \"master\""
+log_warn "     }"
+log_warn "   ]"
+log_warn ""
+log_warn "2. Start the MCP server:"
+log_warn "   dotnet run --project ProjectIndexerMcp/ProjectIndexerMcp.csproj -c Release"
+log_warn ""
+log_warn "3. The server will automatically index the default branches on startup"
+log_warn "4. Wait for indexing to complete (check logs for 'Completed automatic indexing')"
+log_warn "5. Press ENTER to continue with database dump..."
+log_warn ""
 read -p "Press ENTER when indexing is complete: "
 
 # Step 6: Verify data exists

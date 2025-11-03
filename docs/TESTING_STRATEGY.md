@@ -29,6 +29,12 @@ Fixtures are pre-generated test data consisting of:
 2. **Database dumps** - PostgreSQL dumps with indexed data
 3. **Metadata** - JSON files describing the fixture contents
 
+**⚠️ Important**: Fixtures are **not shipped with the repository** due to their size. They must be generated locally using the `refresh-fixtures.sh` script. The `.gitignore` file excludes:
+- `tests/fixtures/dumps/*.dump` - Database dumps
+- `tests/fixtures/repos/*` - Git mirrors
+
+This keeps the repository lightweight while allowing developers to generate fixtures on-demand.
+
 ### Fixture Repositories
 
 | Repository | Language | Size | Purpose |
@@ -91,20 +97,39 @@ project-indexer-mcp/
    - Start PostgreSQL
    - Reset database schema
    - Build MCP server
-   - **Pause for manual indexing** ⚠️
+   - **Pause for manual configuration** ⚠️
 
-3. **When prompted, manually index repositories:**
-   ```bash
-   # In a separate terminal, start the MCP server
-   dotnet run --project ProjectIndexerMcp/ProjectIndexerMcp.csproj -c Release
-   
-   # Use MCP client to add repositories
-   # (e.g., Claude Desktop, Cline, or custom client)
+3. **When prompted, configure repositories in appsettings.json:**
+
+   Edit `ProjectIndexerMcp/appsettings.json`:
+
+   ```json
+   {
+     "Repositories": [
+       {
+         "Name": "project-indexer-mcp",
+         "RemoteUrl": "file:///absolute/path/to/tests/fixtures/repos/project-indexer-mcp.git",
+         "DefaultBranch": "main"
+       },
+       {
+         "Name": "Pulsar4x",
+         "RemoteUrl": "file:///absolute/path/to/tests/fixtures/repos/Pulsar4x.git",
+         "DefaultBranch": "master"
+       }
+     ]
+   }
    ```
 
-4. **After indexing completes, press ENTER** in the script terminal
+4. **Start the MCP server:**
+   ```bash
+   dotnet run --project ProjectIndexerMcp/ProjectIndexerMcp.csproj -c Release
+   ```
 
-5. **The script will:**
+   The server will automatically index the default branches on startup.
+
+5. **After indexing completes, press ENTER** in the script terminal
+
+6. **The script will:**
    - Verify indexed data
    - Create PostgreSQL dump
    - Generate metadata file

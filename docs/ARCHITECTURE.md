@@ -157,32 +157,56 @@ The server can return different result types based on query intent:
 - Call graphs for reference queries
 - File changes for recent activity queries
 
-## Current Status (Step 2 Complete)
+## Current Status (All Steps Complete ✅)
 
-### ✅ What Works Now
+### ✅ Fully Implemented Features
 
-1. **Single MCP Tool**: `Query` tool is exposed
-2. **Git Tracking**: Repositories are cloned and tracked
-3. **Branch Management**: Default + on-demand branch tracking
-4. **Incremental Updates**: Change detection between commits
-5. **Basic Query Response**: Returns repository status (placeholder)
+1. **Single MCP Tool**: `Query` tool with natural language interface
+2. **Git Tracking**: Repositories are cloned, tracked, and persisted to PostgreSQL
+3. **Branch Management**: Default + on-demand branch tracking with database persistence
+4. **Incremental Updates**: Change detection between commits with SHA cursors
+5. **Multi-Language Parsing**:
+   - C# via Roslyn (full semantic analysis)
+   - Python, JavaScript/TypeScript, Java, Go, Rust via regex-based parsers
+6. **Symbol Extraction**: Classes, methods, properties, inheritance, call graphs
+7. **PostgreSQL Storage**: Full schema with repositories, branches, commits, files, symbols, edges
+8. **Code Chunking**: AST-aware chunking with context overlap
+9. **Embedding Generation**: Integration with Text Embeddings Inference (TEI) service
+10. **Hybrid Search**: BM25 full-text + vector semantic search + graph re-ranking
+11. **Query Orchestration**: Intent detection, query parsing, result ranking
+12. **Background Indexing**: Automatic indexing of default branches on startup
 
-### 🚧 What's Coming (Steps 3-8)
+### 🎯 Query Capabilities
 
-1. **Step 3**: Multi-language parsing & symbol extraction
-2. **Step 4**: PostgreSQL + pgvector storage
-3. **Step 5**: Embedding generation
-4. **Step 6**: Query orchestrator with hybrid search
-5. **Step 7**: Full `Query` tool implementation
-6. **Step 8**: Background indexing pipeline
+The `Query` tool supports:
 
-## Testing the Current Implementation
+- **Full-text search**: "find all TODO comments"
+- **Symbol search**: "show me the UserService class"
+- **Reference search**: "what calls the Login method?"
+- **Semantic search**: "find code that validates email addresses"
+- **Recent changes**: "find recent changes in authentication code"
+- **Cross-repository**: Search across all configured repositories
+- **Code navigation**: Symbol definitions, implementations, references
+
+## Testing the Implementation
 
 ```bash
-# Start the server
+# Start the database
+cd database
+docker compose up -d
+./test_setup.sh
+cd ..
+
+# Start the embedding service (optional but recommended)
+docker run -d --name text-embeddings -p 8080:80 \
+  ghcr.io/huggingface/text-embeddings-inference:cpu-1.8 \
+  --model-id jinaai/jina-embeddings-v2-base-code
+
+# Configure repositories in appsettings.json
+# Then start the server
 dotnet run --project ProjectIndexerMcp/ProjectIndexerMcp.csproj
 
-# Query the index (currently returns repo status)
+# Query the index with natural language
 curl -X POST http://localhost:5171/mcp \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your-api-key" \
@@ -192,7 +216,8 @@ curl -X POST http://localhost:5171/mcp \
     "params": {
       "name": "Query",
       "arguments": {
-        "query": "find all authentication code"
+        "query": "find all authentication code",
+        "repository": "my-project"
       }
     },
     "id": 1
@@ -227,20 +252,29 @@ The server parses intent and executes the appropriate search strategy.
 - **Server stays smart**: Optimize, cache, evolve
 - **API stays stable**: Implementation can change without breaking clients
 
-## Future Query Types
+## Implementation Architecture
 
-The `Query` tool will eventually support:
+### Data Flow
 
-1. **Full-text search**: "find all TODO comments"
-2. **Symbol search**: "show me the UserService class"
-3. **Reference search**: "what calls the Login method?"
-4. **Call graph**: "show me the call chain for ProcessPayment"
-5. **Recent changes**: "what changed in the last week?"
-6. **Cross-repository**: "find all uses of ILogger across all repos"
-7. **Semantic search**: "find code that validates email addresses"
-8. **Code navigation**: "show me the implementation of this interface"
+1. **Initialization**: GitTrackerService clones repositories and persists metadata to PostgreSQL
+2. **Branch Tracking**: On-demand branch tracking with automatic fetching and database persistence
+3. **Change Detection**: Git diff between last indexed SHA and current HEAD
+4. **Parsing**: Language-specific parsers extract symbols and relationships
+5. **Chunking**: Code is chunked at function/class boundaries with context overlap
+6. **Embedding**: Chunks are sent to TEI service for vector generation
+7. **Storage**: All data persisted to PostgreSQL with pgvector indexes
+8. **Querying**: Hybrid search combines BM25, vector similarity, and graph traversal
 
-All through ONE tool with natural language queries.
+### Key Services
+
+- **GitTrackerService**: Git operations, branch tracking, change detection, database persistence
+- **IndexingService**: Orchestrates parsing, chunking, embedding, and storage
+- **QueryOrchestrator**: Intent detection, hybrid search, result ranking
+- **RoslynParserService**: C# semantic analysis via Roslyn
+- **BasicParserService**: Regex-based parsing for other languages
+- **ChunkingService**: AST-aware code chunking
+- **EmbeddingService**: TEI client for vector generation
+- **DatabaseService**: PostgreSQL connection and query execution
 
 ## Summary
 
