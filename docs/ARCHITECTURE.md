@@ -197,7 +197,7 @@ docker compose up -d
 ./test_setup.sh
 cd ..
 
-# Start the embedding service (optional but recommended)
+# Start the embedding service
 docker run -d --name text-embeddings -p 8080:80 \
   ghcr.io/huggingface/text-embeddings-inference:cpu-1.8 \
   --model-id jinaai/jina-embeddings-v2-base-code

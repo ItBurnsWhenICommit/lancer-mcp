@@ -1,20 +1,23 @@
 # ProjectIndexerMcp Tests
 
-Integration tests for the Project Indexer MCP server.
+Unit tests for the Project Indexer MCP server.
 
 ## Test Coverage
 
 ### GitTrackerService Tests
+These tests use **in-memory mocks** to verify business logic without requiring a real database:
 - ✅ Repository initialization and cloning
 - ✅ Branch tracking (on-demand lazy loading)
 - ✅ Branch existence checking
 - ✅ Remote branch enumeration
 - ✅ File change detection
 - ✅ Branch indexing state management
-- ✅ Repository and branch metadata persisted to PostgreSQL
-- ✅ Existing branches loaded from database on startup
+- ✅ Repository and branch metadata logic (using MockRepositoryRepository)
+- ✅ Existing branches loaded from mock storage on startup
 - ✅ Stale branch cleanup
 - ✅ Default branch protection
+
+**Note:** These tests use mock implementations (`MockRepositoryRepository`, `MockBranchRepository`) that store data in-memory dictionaries. For real PostgreSQL integration tests, see `tests/ProjectIndexerMcp.IntegrationTests/GitTrackerIntegrationTests.cs`.
 
 ### BranchCleanupHostedService Tests
 - ✅ Graceful cancellation

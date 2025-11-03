@@ -37,7 +37,7 @@ docker compose up -d
 cd ..
 ```
 
-### 3. Start Embedding Service (Optional but Recommended)
+### 3. Start Embedding Service
 
 ```bash
 # CPU mode (slower but works without GPU)

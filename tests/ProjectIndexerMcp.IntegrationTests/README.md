@@ -7,8 +7,31 @@ This directory contains integration tests for the Project Indexer MCP server.
 Integration tests verify the complete system behavior using pre-indexed fixtures. Unlike unit tests, these tests:
 - Use a real PostgreSQL database
 - Work with actual Git repositories
-- Test the full query pipeline (BM25 + vector + graph)
-- Verify end-to-end functionality
+- Test the full query pipeline (BM25 + vector + graph) via QueryOrchestrator
+- Verify end-to-end functionality including repository and branch persistence
+- Exercise actual service implementations, not mocks
+
+## Test Suites
+
+### 1. QueryOrchestratorTests
+Basic database verification tests that ensure fixtures are loaded correctly.
+
+### 2. GitTrackerIntegrationTests
+Real PostgreSQL integration tests that verify:
+- Repository metadata persistence
+- Branch metadata persistence
+- Index state tracking
+- Database CRUD operations
+
+### 3. QueryOrchestratorEndToEndTests
+True end-to-end tests that exercise the complete query pipeline:
+- Navigation queries (find symbols by name)
+- Relation queries (find symbol relationships via graph)
+- Full-text search (BM25)
+- Hybrid search (BM25 + vector similarity)
+- Graph re-ranking
+- Query intent detection
+- Result scoring and ranking
 
 ## Prerequisites
 
@@ -152,14 +175,19 @@ rm -rf $TEST_WORKING_DIR
 
 ## Continuous Integration
 
-Integration tests are designed to run in CI. See `.github/workflows/integration-tests.yml` for the CI configuration.
+Integration tests run automatically in CI via GitHub Actions. See `.github/workflows/integration-tests.yml` for the full configuration.
 
-CI workflow:
-1. Checkout code
-2. Start PostgreSQL via Docker Compose
-3. Run `restore-fixtures.sh` (or download pre-built fixtures from artifact storage)
-4. Run integration tests
-5. Upload test results and coverage
+### CI Workflow
+
+**Integration Tests** (runs on all PRs and pushes):
+1. Start PostgreSQL service
+2. Start Text Embeddings Inference (CPU mode)
+3. Setup database schema
+4. Restore test fixtures (if available)
+5. Run integration tests
+6. Upload test results
+
+The embedding service is **required** for the system to function.
 
 ## Troubleshooting
 

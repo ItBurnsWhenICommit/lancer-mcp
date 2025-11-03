@@ -310,11 +310,8 @@ public sealed class IndexingService
 
                 // Step 6: Generate and persist embeddings
                 var embeddings = await _embeddingService.GenerateEmbeddingsAsync(allChunks, cancellationToken);
-                if (embeddings.Any())
-                {
-                    await _embeddingRepository.CreateBatchAsync(embeddings, cancellationToken);
-                    _logger.LogInformation("Persisted {Count} embeddings", embeddings.Count);
-                }
+                await _embeddingRepository.CreateBatchAsync(embeddings, cancellationToken);
+                _logger.LogInformation("Persisted {Count} embeddings", embeddings.Count);
             }
 
             _logger.LogInformation("Storage persistence complete");
