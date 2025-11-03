@@ -3,6 +3,7 @@ using LibGit2Sharp;
 using Microsoft.Extensions.Options;
 using ProjectIndexerMcp.Configuration;
 using ProjectIndexerMcp.Models;
+using ProjectIndexerMcp.Repositories;
 using GitRepository = LibGit2Sharp.Repository;
 using GitCommit = LibGit2Sharp.Commit;
 
@@ -10,21 +11,28 @@ namespace ProjectIndexerMcp.Services;
 
 /// <summary>
 /// Manages Git repository cloning, fetching, and incremental change tracking.
+/// Persists repository and branch metadata to PostgreSQL.
 /// </summary>
 public sealed class GitTrackerService : IDisposable
 {
     private readonly ILogger<GitTrackerService> _logger;
     private readonly IOptionsMonitor<ServerOptions> _options;
+    private readonly IRepositoryRepository _repositoryRepository;
+    private readonly IBranchRepository _branchRepository;
     private readonly ConcurrentDictionary<string, RepositoryState> _repositories = new();
     private readonly SemaphoreSlim _updateLock = new(1, 1);
     private bool _disposed;
 
     public GitTrackerService(
         ILogger<GitTrackerService> logger,
-        IOptionsMonitor<ServerOptions> options)
+        IOptionsMonitor<ServerOptions> options,
+        IRepositoryRepository repositoryRepository,
+        IBranchRepository branchRepository)
     {
         _logger = logger;
         _options = options;
+        _repositoryRepository = repositoryRepository;
+        _branchRepository = branchRepository;
     }
 
     /// <summary>
@@ -38,6 +46,7 @@ public sealed class GitTrackerService : IDisposable
 
     /// <summary>
     /// Initializes all configured repositories.
+    /// Loads existing repository and branch metadata from the database.
     /// </summary>
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -59,6 +68,7 @@ public sealed class GitTrackerService : IDisposable
 
     /// <summary>
     /// Ensures a repository is cloned and tracked.
+    /// Persists repository metadata to the database.
     /// </summary>
     private async Task<RepositoryState> EnsureRepositoryAsync(ServerOptions.RepositoryDescriptor config, CancellationToken cancellationToken)
     {
@@ -77,6 +87,9 @@ public sealed class GitTrackerService : IDisposable
         if (!state.IsCloned)
         {
             await CloneOrOpenRepositoryAsync(state, cancellationToken);
+
+            // Persist repository metadata to database
+            await EnsureRepositoryInDatabaseAsync(state, cancellationToken);
         }
 
         return state;
@@ -157,6 +170,7 @@ public sealed class GitTrackerService : IDisposable
     /// <summary>
     /// Internal method to update a branch without acquiring the lock (assumes lock is already held).
     /// Fetches from remote and updates the branch state.
+    /// Persists branch metadata to the database.
     /// </summary>
     private async Task<BranchState> UpdateBranchInternalAsync(RepositoryState repoState, string branchName, CancellationToken cancellationToken)
     {
@@ -200,12 +214,16 @@ public sealed class GitTrackerService : IDisposable
             _logger.LogInformation("Updated branch {Branch} in repository {Repo} to {Sha}", branchName, repoState.Name, currentSha);
         }
 
+        // Persist branch metadata to database
+        await EnsureBranchInDatabaseAsync(repoState.Name, branchName, currentSha, cancellationToken);
+
         repoState.LastUpdated = DateTimeOffset.UtcNow;
         return branchState;
     }
 
     /// <summary>
     /// Marks a branch as indexed at its current commit SHA.
+    /// Persists the index state to the database asynchronously (fire-and-forget).
     /// </summary>
     public void MarkBranchAsIndexed(string repositoryName, string branchName)
     {
@@ -228,6 +246,20 @@ public sealed class GitTrackerService : IDisposable
             branchName,
             repositoryName,
             branchState.CurrentSha);
+
+        // Persist to database asynchronously (fire-and-forget)
+        // We don't await here to avoid blocking the caller
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await UpdateBranchIndexStateAsync(repositoryName, branchName, branchState.CurrentSha!, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to update branch index state in database for {Repo}/{Branch}", repositoryName, branchName);
+            }
+        });
     }
 
     /// <summary>
@@ -470,6 +502,121 @@ public sealed class GitTrackerService : IDisposable
     public string? GetRepositoryPath(string repositoryName)
     {
         return _repositories.TryGetValue(repositoryName, out var repoState) ? repoState.LocalPath : null;
+    }
+
+    /// <summary>
+    /// Ensures repository metadata exists in the database.
+    /// Creates or updates the repository record.
+    /// </summary>
+    private async Task<Models.Repository> EnsureRepositoryInDatabaseAsync(RepositoryState state, CancellationToken cancellationToken)
+    {
+        var existingRepo = await _repositoryRepository.GetByNameAsync(state.Name, cancellationToken);
+
+        if (existingRepo != null)
+        {
+            _logger.LogDebug("Repository {Name} already exists in database with ID {Id}", state.Name, existingRepo.Id);
+            return existingRepo;
+        }
+
+        var newRepo = new Models.Repository
+        {
+            Name = state.Name,
+            RemoteUrl = state.RemoteUrl,
+            DefaultBranch = state.DefaultBranch
+        };
+
+        var createdRepo = await _repositoryRepository.CreateAsync(newRepo, cancellationToken);
+        _logger.LogInformation("Created repository {Name} in database with ID {Id}", state.Name, createdRepo.Id);
+
+        return createdRepo;
+    }
+
+    /// <summary>
+    /// Ensures branch metadata exists in the database.
+    /// Creates or updates the branch record.
+    /// </summary>
+    private async Task<Models.Branch> EnsureBranchInDatabaseAsync(
+        string repositoryName,
+        string branchName,
+        string headCommitSha,
+        CancellationToken cancellationToken)
+    {
+        // Get repository from database
+        var repo = await _repositoryRepository.GetByNameAsync(repositoryName, cancellationToken);
+        if (repo == null)
+        {
+            throw new InvalidOperationException($"Repository {repositoryName} not found in database");
+        }
+
+        // Check if branch already exists
+        var existingBranch = await _branchRepository.GetByRepoAndNameAsync(repo.Id, branchName, cancellationToken);
+
+        if (existingBranch != null)
+        {
+            // Update if HEAD has changed
+            if (existingBranch.HeadCommitSha != headCommitSha)
+            {
+                var updatedBranch = new Models.Branch
+                {
+                    Id = existingBranch.Id,
+                    RepoId = existingBranch.RepoId,
+                    Name = existingBranch.Name,
+                    HeadCommitSha = headCommitSha,
+                    IndexState = IndexState.Stale, // Mark as stale when HEAD changes
+                    IndexedCommitSha = existingBranch.IndexedCommitSha,
+                    LastIndexedAt = existingBranch.LastIndexedAt,
+                    CreatedAt = existingBranch.CreatedAt,
+                    UpdatedAt = DateTimeOffset.UtcNow
+                };
+
+                var result = await _branchRepository.UpdateAsync(updatedBranch, cancellationToken);
+                _logger.LogDebug("Updated branch {Branch} in database, HEAD changed to {Sha}", branchName, headCommitSha);
+                return result;
+            }
+
+            return existingBranch;
+        }
+
+        // Create new branch
+        var newBranch = new Models.Branch
+        {
+            RepoId = repo.Id,
+            Name = branchName,
+            HeadCommitSha = headCommitSha,
+            IndexState = IndexState.Pending
+        };
+
+        var createdBranch = await _branchRepository.CreateAsync(newBranch, cancellationToken);
+        _logger.LogInformation("Created branch {Branch} in database for repository {Repo}", branchName, repositoryName);
+
+        return createdBranch;
+    }
+
+    /// <summary>
+    /// Updates branch index state in the database after successful indexing.
+    /// </summary>
+    private async Task UpdateBranchIndexStateAsync(
+        string repositoryName,
+        string branchName,
+        string indexedCommitSha,
+        CancellationToken cancellationToken)
+    {
+        var repo = await _repositoryRepository.GetByNameAsync(repositoryName, cancellationToken);
+        if (repo == null)
+        {
+            _logger.LogWarning("Repository {Name} not found in database, skipping branch state update", repositoryName);
+            return;
+        }
+
+        var branch = await _branchRepository.GetByRepoAndNameAsync(repo.Id, branchName, cancellationToken);
+        if (branch == null)
+        {
+            _logger.LogWarning("Branch {Branch} not found in database for repository {Repo}, skipping state update", branchName, repositoryName);
+            return;
+        }
+
+        await _branchRepository.UpdateIndexStateAsync(branch.Id, IndexState.Completed, indexedCommitSha, cancellationToken);
+        _logger.LogDebug("Updated branch {Branch} index state to Completed in database", branchName);
     }
 
     /// <summary>
