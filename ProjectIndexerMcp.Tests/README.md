@@ -11,6 +11,8 @@ Integration tests for the Project Indexer MCP server.
 - ✅ Remote branch enumeration
 - ✅ File change detection
 - ✅ Branch indexing state management
+- ✅ Repository and branch metadata persisted to PostgreSQL
+- ✅ Existing branches loaded from database on startup
 - ✅ Stale branch cleanup
 - ✅ Default branch protection
 

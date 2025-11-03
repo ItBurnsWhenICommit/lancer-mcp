@@ -75,10 +75,10 @@ dotnet run --project ProjectIndexerMcp/ProjectIndexerMcp.csproj
 ```
 
 The server will:
-1. Clone configured repositories
+1. Clone configured repositories (or load existing state from database)
 2. Parse code and extract symbols
 3. Generate embeddings (if embedding service is running)
-4. Store data in PostgreSQL
+4. Store data in PostgreSQL (including branch tracking state)
 5. Start MCP server on `http://localhost:5171`
 
 ## ✅ Features
@@ -88,6 +88,7 @@ The server will:
 - Efficient bare repository storage
 - Default branch tracking (main/master/trunk)
 - Incremental change detection (per-branch SHA cursors)
+- Persistent branch state - Survives service restarts
 - Thread-safe concurrent operations
 
 ### Multi-Language Code Parsing

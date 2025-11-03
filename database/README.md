@@ -10,6 +10,7 @@ The database is designed to support:
 - **Graph traversal** for code relationships (calls, references, inheritance)
 - **Hybrid search** combining BM25 + vector search + graph re-ranking
 - **Incremental indexing** with branch and commit tracking
+- **Persistent branch state** - Repository and branch metadata survives service restarts
 
 ## Prerequisites
 

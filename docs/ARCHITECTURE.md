@@ -256,14 +256,41 @@ The server parses intent and executes the appropriate search strategy.
 
 ### Data Flow
 
-1. **Initialization**: GitTrackerService clones repositories and persists metadata to PostgreSQL
-2. **Branch Tracking**: On-demand branch tracking with automatic fetching and database persistence
+1. **Initialization**:
+   - GitTrackerService clones repositories
+   - Repository metadata persisted to PostgreSQL
+   - Existing branch state loaded from database (resumes tracking after restart)
+2. **Branch Tracking**:
+   - On-demand branch tracking with automatic fetching
+   - Branch metadata persisted to database (HEAD SHA, index state)
+   - HEAD changes automatically mark branches as `Stale`
 3. **Change Detection**: Git diff between last indexed SHA and current HEAD
 4. **Parsing**: Language-specific parsers extract symbols and relationships
 5. **Chunking**: Code is chunked at function/class boundaries with context overlap
 6. **Embedding**: Chunks are sent to TEI service for vector generation
 7. **Storage**: All data persisted to PostgreSQL with pgvector indexes
 8. **Querying**: Hybrid search combines BM25, vector similarity, and graph traversal
+
+### Branch Persistence Lifecycle
+
+```
+Service Start
+    ↓
+Clone/Open Repository
+    ↓
+Persist Repository Metadata → PostgreSQL (repositories table)
+    ↓
+Load Existing Branches ← PostgreSQL (branches table)
+    ↓
+In-Memory State Populated (BranchState objects)
+    ↓
+Branch Tracking
+    ├─→ New Branch Detected → Create in DB (IndexState: Pending)
+    ├─→ HEAD Changed → Update in DB (IndexState: Stale)
+    └─→ Indexing Complete → Update in DB (IndexState: Completed)
+    ↓
+Service Restart → Load from DB (resume tracking)
+```
 
 ### Key Services
 
