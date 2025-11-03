@@ -106,10 +106,10 @@ public sealed class CodeChunkRepository : ICodeChunkRepository
                    end_line AS EndLine, chunk_start_line AS ChunkStartLine, chunk_end_line AS ChunkEndLine,
                    token_count AS TokenCount, parent_symbol_name AS ParentSymbolName, signature,
                    documentation, created_at AS CreatedAt,
-                   ts_rank(content_tsv, websearch_to_tsquery('english', @Query)) AS rank
+                   ts_rank(to_tsvector('english', content), websearch_to_tsquery('english', @Query)) AS rank
             FROM code_chunks
             WHERE repo_id = @RepoId
-                  AND content_tsv @@ websearch_to_tsquery('english', @Query)";
+                  AND to_tsvector('english', content) @@ websearch_to_tsquery('english', @Query)";
 
         if (!string.IsNullOrEmpty(branchName))
         {
