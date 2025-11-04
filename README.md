@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logo.png" alt="LANCER Logo" width="350"/>
+</p>
+
 # Project Indexer MCP
 
 A self-hosted MCP (Model Context Protocol) server that indexes Git repositories and provides intelligent code search for AI agents using hybrid search (BM25 + vector embeddings + graph traversal).
