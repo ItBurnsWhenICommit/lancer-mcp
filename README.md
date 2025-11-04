@@ -2,7 +2,7 @@
   <img src="lancerLogo.png" alt="LANCER Logo" width="350"/>
 </p>
 
-# Lancer MCP
+# 🗡 Lancer MCP
 
 A self-hosted MCP (Model Context Protocol) server that indexes Git repositories and provides intelligent code search for AI agents using hybrid search (BM25 + vector embeddings + graph traversal).
 
@@ -147,14 +147,15 @@ The server will:
 
 ## 🗺️ Roadmap
 
-- [x] **Step 1**: MCP server bootstrap with HTTP transport
-- [x] **Step 2**: Git tracker (clone, fetch, branch tracking, incremental diffs)
-- [x] **Step 3**: Multi-language parsing & symbol extraction
-- [x] **Step 4**: PostgreSQL + pgvector storage
-- [x] **Step 5**: Embedding generation with jina-embeddings-v2-base-code
-- [x] **Step 6**: Hybrid search & query orchestrator
-- [ ] **Step 7**: Enhanced query capabilities (call graphs, recent changes)
-- [ ] **Step 8**: Performance optimization and caching
+- [x] MCP server bootstrap with HTTP transport
+- [x] Git tracker (clone, fetch, branch tracking, incremental diffs)
+- [x] Multi-language parsing & symbol extraction
+- [x] PostgreSQL + pgvector storage
+- [x] Embedding generation with jina-embeddings-v2-base-code
+- [x] Hybrid search & query orchestrator
+- [ ] Enhanced query capabilities (call graphs, recent changes)
+- [ ] Performance optimization and caching
+- [ ] Add broader language support — TypeScript, Java, Go, Rust, Python (current focus on C#)
 
 ## 🔧 Architecture
 
@@ -273,15 +274,16 @@ Key settings in `appsettings.json`:
 }
 ```
 
-## 🙏 Acknowledgments
+## 🍻 Acknowledgments
 
 Built with:
 - [ModelContextProtocol.AspNetCore](https://github.com/modelcontextprotocol/csharp-sdk) - MCP C# SDK
 - [LibGit2Sharp](https://github.com/libgit2/libgit2sharp) - Git operations
 - [Roslyn](https://github.com/dotnet/roslyn) - C# semantic analysis
+- [Npgsql](https://github.com/npgsql/npgsql) - PostgreSQL .NET driver
 - [Dapper](https://github.com/DapperLib/Dapper) - Lightweight ORM
-- [PostgreSQL](https://www.postgresql.org/) - Database
-- [pgvector](https://github.com/pgvector/pgvector) - Vector similarity search
+- [PostgreSQL](https://www.postgresql.org/) with [pgvector](https://github.com/pgvector/pgvector) - Database and vector similarity search
 - [Text Embeddings Inference](https://github.com/huggingface/text-embeddings-inference) - Embedding service
 - [jina-embeddings-v2-base-code](https://huggingface.co/jinaai/jina-embeddings-v2-base-code) - Code embedding model
+- [xUnit](https://github.com/xunit/xunit) with [FluentAssertions](https://github.com/fluentassertions/fluentassertions) - Testing framework
 - [.NET 9.0](https://dotnet.microsoft.com/) - Runtime and SDK
