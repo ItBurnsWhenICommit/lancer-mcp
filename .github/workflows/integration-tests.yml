@@ -1,0 +1,194 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  integration-tests:
+    name: Run Integration Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: project_indexer_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Start Text Embeddings Inference (CPU mode)
+        run: |
+          docker run -d --name text-embeddings \
+            -p 8080:80 \
+            ghcr.io/huggingface/text-embeddings-inference:cpu-1.8 \
+            --model-id jinaai/jina-embeddings-v2-base-code
+
+          # Wait for service to be ready
+          echo "Waiting for embedding service to start..."
+          for i in {1..30}; do
+            if curl -s http://localhost:8080/health > /dev/null; then
+              echo "Embedding service is ready!"
+              break
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 2
+          done
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Setup PostgreSQL schema
+        working-directory: ./database
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: project_indexer_test
+        run: |
+          until pg_isready -h localhost -p 5432 -U postgres; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+
+          for migration in schema/*.sql; do
+            echo "Running migration: $migration"
+            psql -h localhost -U postgres -d project_indexer_test -f "$migration"
+          done
+
+      - name: Clone test repositories
+        run: |
+          mkdir -p /tmp/test-repos
+          cd /tmp/test-repos
+
+          # Clone project-indexer-mcp as a bare repository
+          git clone --mirror https://github.com/ItBurnsWhenICommit/project-indexer-mcp.git project-indexer-mcp.git
+
+          # Clone Pulsar4x as a bare repository (smaller subset for faster CI)
+          git clone --mirror --depth=1 https://github.com/Pulsar4xDevs/Pulsar4x.git Pulsar4x.git
+
+      - name: Configure test repositories
+        run: |
+          # Create appsettings.Test.json with test repository configuration
+          cat > ProjectIndexerMcp/appsettings.Test.json <<EOF
+          {
+            "Repositories": [
+              {
+                "Name": "project-indexer-mcp",
+                "RemoteUrl": "file:///tmp/test-repos/project-indexer-mcp.git",
+                "DefaultBranch": "main"
+              },
+              {
+                "Name": "Pulsar4x",
+                "RemoteUrl": "file:///tmp/test-repos/Pulsar4x.git",
+                "DefaultBranch": "master"
+              }
+            ],
+            "DatabaseHost": "localhost",
+            "DatabasePort": 5432,
+            "DatabaseName": "project_indexer_test",
+            "DatabaseUser": "postgres",
+            "DatabasePassword": "postgres",
+            "EmbeddingServiceUrl": "http://localhost:8080",
+            "EmbeddingBatchSize": 16,
+            "EmbeddingTimeoutSeconds": 300,
+            "WorkingDirectory": "/tmp/project-indexer-test"
+          }
+          EOF
+
+      - name: Index repositories
+        env:
+          ASPNETCORE_ENVIRONMENT: Test
+        run: |
+          # Start the MCP server in the background to index repositories
+          dotnet run --project ProjectIndexerMcp/ProjectIndexerMcp.csproj --no-build --configuration Release &
+          SERVER_PID=$!
+
+          # Wait for indexing to complete (monitor logs)
+          echo "Waiting for indexing to complete..."
+          sleep 10
+
+          # Check if indexing is progressing
+          for i in {1..60}; do
+            SYMBOL_COUNT=$(PGPASSWORD=postgres psql -h localhost -U postgres -d project_indexer_test -t -c "SELECT COUNT(*) FROM symbols;" 2>/dev/null || echo "0")
+            SYMBOL_COUNT=$(echo $SYMBOL_COUNT | xargs)
+            echo "Indexed symbols: $SYMBOL_COUNT (check $i/60)"
+
+            if [ "$SYMBOL_COUNT" -gt 100 ]; then
+              echo "Indexing appears complete with $SYMBOL_COUNT symbols"
+              break
+            fi
+
+            sleep 5
+          done
+
+          # Stop the server
+          kill $SERVER_PID || true
+          wait $SERVER_PID || true
+
+          # Verify we have data
+          FINAL_COUNT=$(PGPASSWORD=postgres psql -h localhost -U postgres -d project_indexer_test -t -c "SELECT COUNT(*) FROM symbols;" | xargs)
+          echo "Final symbol count: $FINAL_COUNT"
+
+          if [ "$FINAL_COUNT" -eq 0 ]; then
+            echo "ERROR: No symbols were indexed!"
+            exit 1
+          fi
+
+      - name: Prepare test environment
+        run: |
+          # Create test working directory
+          mkdir -p /tmp/project-indexer-test
+
+          # Copy Git mirrors to test working directory (tests expect them here)
+          cp -r /tmp/test-repos/*.git /tmp/project-indexer-test/
+
+      - name: Run integration tests with embeddings
+        working-directory: ./tests/ProjectIndexerMcp.IntegrationTests
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+          TEST_DB_NAME: project_indexer_test
+          TEST_WORKING_DIR: /tmp/project-indexer-test
+          EMBEDDING_SERVICE_URL: "http://localhost:8080"
+        run: |
+          dotnet test --no-build --configuration Release --verbosity normal --logger "trx;LogFileName=integration-test-embeddings-results.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-with-embeddings
+          path: |
+            **/TestResults/*.trx
+            **/*.trx
+
+      - name: Stop embedding service
+        if: always()
+        run: docker stop text-embeddings || true
+
