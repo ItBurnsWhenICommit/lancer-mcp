@@ -59,7 +59,7 @@ COMMENT ON COLUMN code_chunks.token_count IS 'Approximate token count for embedd
 -- ============================================================================
 CREATE TABLE embeddings (
     id TEXT PRIMARY KEY,
-    chunk_id TEXT NOT NULL REFERENCES code_chunks(id) ON DELETE CASCADE,
+    chunk_id TEXT NOT NULL UNIQUE REFERENCES code_chunks(id) ON DELETE CASCADE,
     repo_id TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
     branch_name TEXT NOT NULL,
     commit_sha TEXT NOT NULL,
@@ -69,7 +69,6 @@ CREATE TABLE embeddings (
     generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_embeddings_chunk_id ON embeddings(chunk_id);
 CREATE INDEX idx_embeddings_repo_id ON embeddings(repo_id);
 CREATE INDEX idx_embeddings_repo_branch ON embeddings(repo_id, branch_name);
 CREATE INDEX idx_embeddings_model ON embeddings(model);
@@ -111,7 +110,7 @@ RETURNS TABLE (
 ) AS $$
 BEGIN
     RETURN QUERY
-    SELECT 
+    SELECT
         c.id,
         c.repo_id,
         c.branch_name,
@@ -121,7 +120,7 @@ BEGIN
         1 - (e.vector <=> query_vector) AS similarity
     FROM embeddings e
     JOIN code_chunks c ON e.chunk_id = c.id
-    WHERE 
+    WHERE
         (repo_filter IS NULL OR c.repo_id = repo_filter)
         AND (branch_filter IS NULL OR c.branch_name = branch_filter)
     ORDER BY e.vector <=> query_vector
@@ -149,7 +148,7 @@ RETURNS TABLE (
 ) AS $$
 BEGIN
     RETURN QUERY
-    SELECT 
+    SELECT
         c.id,
         c.repo_id,
         c.branch_name,
@@ -159,7 +158,7 @@ BEGIN
         (e.vector <-> query_vector)::FLOAT AS distance
     FROM embeddings e
     JOIN code_chunks c ON e.chunk_id = c.id
-    WHERE 
+    WHERE
         (repo_filter IS NULL OR c.repo_id = repo_filter)
         AND (branch_filter IS NULL OR c.branch_name = branch_filter)
     ORDER BY e.vector <-> query_vector
