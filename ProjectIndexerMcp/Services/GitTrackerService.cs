@@ -523,6 +523,7 @@ public sealed class GitTrackerService : IDisposable
 
         var newRepo = new Models.Repository
         {
+            Id = state.Name,
             Name = state.Name,
             RemoteUrl = state.RemoteUrl,
             DefaultBranch = state.DefaultBranch
