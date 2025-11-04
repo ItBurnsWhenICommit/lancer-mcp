@@ -36,9 +36,11 @@ public class QueryOrchestratorEndToEndTests : FixtureTestBase
             EmbeddingTimeoutSeconds = 60
         };
 
+        var optionsMonitor = new TestOptionsMonitor(serverOptions);
+
         var databaseService = new DatabaseService(
-            Options.Create(serverOptions),
-            NullLogger<DatabaseService>.Instance
+            NullLogger<DatabaseService>.Instance,
+            optionsMonitor
         );
 
         _symbolRepository = new SymbolRepository(databaseService, NullLogger<SymbolRepository>.Instance);
@@ -54,7 +56,7 @@ public class QueryOrchestratorEndToEndTests : FixtureTestBase
 
         var embeddingService = new EmbeddingService(
             httpClient,
-            Options.Create(serverOptions),
+            optionsMonitor,
             NullLogger<EmbeddingService>.Instance
         );
 
@@ -345,6 +347,25 @@ public class QueryOrchestratorEndToEndTests : FixtureTestBase
         {
             Console.WriteLine($"⚠️  Query executed but no graph scores applied (may need more graph data)");
         }
+    }
+
+    /// <summary>
+    /// Simple test implementation of IOptionsMonitor for testing.
+    /// </summary>
+    private class TestOptionsMonitor : IOptionsMonitor<ServerOptions>
+    {
+        private readonly ServerOptions _options;
+
+        public TestOptionsMonitor(ServerOptions options)
+        {
+            _options = options;
+        }
+
+        public ServerOptions CurrentValue => _options;
+
+        public ServerOptions Get(string? name) => _options;
+
+        public IDisposable? OnChange(Action<ServerOptions, string?> listener) => null;
     }
 }
 

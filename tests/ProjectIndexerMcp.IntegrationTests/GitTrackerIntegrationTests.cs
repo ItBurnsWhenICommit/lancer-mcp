@@ -22,16 +22,18 @@ public class GitTrackerIntegrationTests : FixtureTestBase
 
     public GitTrackerIntegrationTests()
     {
+        var serverOptions = new ServerOptions
+        {
+            DatabaseHost = Environment.GetEnvironmentVariable("DB_HOST") ?? "localhost",
+            DatabasePort = int.Parse(Environment.GetEnvironmentVariable("DB_PORT") ?? "5432"),
+            DatabaseName = TestDatabaseName,
+            DatabaseUser = Environment.GetEnvironmentVariable("DB_USER") ?? "postgres",
+            DatabasePassword = Environment.GetEnvironmentVariable("DB_PASSWORD") ?? "postgres"
+        };
+
         _databaseService = new DatabaseService(
-            Options.Create(new ServerOptions
-            {
-                DatabaseHost = Environment.GetEnvironmentVariable("DB_HOST") ?? "localhost",
-                DatabasePort = int.Parse(Environment.GetEnvironmentVariable("DB_PORT") ?? "5432"),
-                DatabaseName = TestDatabaseName,
-                DatabaseUser = Environment.GetEnvironmentVariable("DB_USER") ?? "postgres",
-                DatabasePassword = Environment.GetEnvironmentVariable("DB_PASSWORD") ?? "postgres"
-            }),
-            NullLogger<DatabaseService>.Instance
+            NullLogger<DatabaseService>.Instance,
+            new TestOptionsMonitor(serverOptions)
         );
 
         _repositoryRepository = new RepositoryRepository(_databaseService, NullLogger<RepositoryRepository>.Instance);
@@ -151,7 +153,7 @@ public class GitTrackerIntegrationTests : FixtureTestBase
             RepoId = branch.RepoId,
             Name = branch.Name,
             HeadCommitSha = branch.HeadCommitSha,
-            IndexState = IndexState.Indexed,
+            IndexState = IndexState.Completed,
             IndexedCommitSha = "abc123",
             LastIndexedAt = DateTimeOffset.UtcNow,
             CreatedAt = branch.CreatedAt,
@@ -161,7 +163,7 @@ public class GitTrackerIntegrationTests : FixtureTestBase
 
         // Assert - Update should be persisted
         updated.Should().NotBeNull();
-        updated.IndexState.Should().Be(IndexState.Indexed);
+        updated.IndexState.Should().Be(IndexState.Completed);
         updated.IndexedCommitSha.Should().Be("abc123");
         updated.LastIndexedAt.Should().NotBeNull();
 
@@ -170,7 +172,7 @@ public class GitTrackerIntegrationTests : FixtureTestBase
 
         // Assert - Retrieved should reflect the update
         retrieved.Should().NotBeNull();
-        retrieved!.IndexState.Should().Be(IndexState.Indexed);
+        retrieved!.IndexState.Should().Be(IndexState.Completed);
         retrieved.IndexedCommitSha.Should().Be("abc123");
         retrieved.LastIndexedAt.Should().NotBeNull();
 
@@ -191,7 +193,7 @@ public class GitTrackerIntegrationTests : FixtureTestBase
 
         var branches = new[]
         {
-            new Branch { RepoId = repo.Id, Name = "main", HeadCommitSha = "sha1", IndexState = IndexState.Indexed },
+            new Branch { RepoId = repo.Id, Name = "main", HeadCommitSha = "sha1", IndexState = IndexState.Completed },
             new Branch { RepoId = repo.Id, Name = "develop", HeadCommitSha = "sha2", IndexState = IndexState.Pending },
             new Branch { RepoId = repo.Id, Name = "feature/test", HeadCommitSha = "sha3", IndexState = IndexState.Stale }
         };
@@ -207,7 +209,7 @@ public class GitTrackerIntegrationTests : FixtureTestBase
 
         // Assert
         branchList.Should().HaveCount(3);
-        branchList.Should().Contain(b => b.Name == "main" && b.IndexState == IndexState.Indexed);
+        branchList.Should().Contain(b => b.Name == "main" && b.IndexState == IndexState.Completed);
         branchList.Should().Contain(b => b.Name == "develop" && b.IndexState == IndexState.Pending);
         branchList.Should().Contain(b => b.Name == "feature/test" && b.IndexState == IndexState.Stale);
 
@@ -215,7 +217,7 @@ public class GitTrackerIntegrationTests : FixtureTestBase
     }
 
     [Fact]
-    public async Task BranchRepository_GetStale_ShouldReturnOnlyStaleBranches()
+    public async Task BranchRepository_GetByIndexState_ShouldReturnOnlyStaleBranches()
     {
         // Arrange - Create repository with mixed branch states
         var testRepo = new Repository
@@ -231,7 +233,7 @@ public class GitTrackerIntegrationTests : FixtureTestBase
             RepoId = repo.Id,
             Name = "main",
             HeadCommitSha = "sha1",
-            IndexState = IndexState.Indexed,
+            IndexState = IndexState.Completed,
             LastIndexedAt = DateTimeOffset.UtcNow.AddDays(-1)
         });
 
@@ -245,7 +247,7 @@ public class GitTrackerIntegrationTests : FixtureTestBase
         });
 
         // Act
-        var staleBranches = await _branchRepository.GetStaleAsync(repo.Id);
+        var staleBranches = await _branchRepository.GetByIndexStateAsync(IndexState.Stale);
         var staleList = staleBranches.ToList();
 
         // Assert
@@ -283,6 +285,25 @@ public class GitTrackerIntegrationTests : FixtureTestBase
         repoList.Should().Contain(r => r.Id == repo2.Id);
 
         Console.WriteLine($"✅ Retrieved {repoList.Count} repositories from PostgreSQL");
+    }
+
+    /// <summary>
+    /// Simple test implementation of IOptionsMonitor for testing.
+    /// </summary>
+    private class TestOptionsMonitor : IOptionsMonitor<ServerOptions>
+    {
+        private readonly ServerOptions _options;
+
+        public TestOptionsMonitor(ServerOptions options)
+        {
+            _options = options;
+        }
+
+        public ServerOptions CurrentValue => _options;
+
+        public ServerOptions Get(string? name) => _options;
+
+        public IDisposable? OnChange(Action<ServerOptions, string?> listener) => null;
     }
 }
 
