@@ -248,10 +248,10 @@ public class GitTrackerIntegrationTests : FixtureTestBase
 
         // Act
         var staleBranches = await _branchRepository.GetByIndexStateAsync(IndexState.Stale);
-        var staleList = staleBranches.ToList();
+        var staleList = staleBranches.Where(b => b.RepoId == repo.Id).ToList();
 
         // Assert
-        staleList.Should().HaveCount(1);
+        staleList.Should().HaveCount(1, "only the stale branch from our test repository should be returned");
         staleList[0].Name.Should().Be("stale-branch");
         staleList[0].IndexState.Should().Be(IndexState.Stale);
 

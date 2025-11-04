@@ -185,18 +185,43 @@ public class QueryOrchestratorEndToEndTests : FixtureTestBase
         response.Results.Should().NotBeEmpty("should find code using hybrid search");
 
         // Check if we have both BM25 and vector scores
-        var resultsWithScores = response.Results.Where(r => r.BM25Score.HasValue && r.VectorScore.HasValue).ToList();
+        var resultsWithBothScores = response.Results.Where(r =>
+            r.BM25Score.HasValue && r.BM25Score.Value > 0 &&
+            r.VectorScore.HasValue && r.VectorScore.Value > 0).ToList();
 
-        if (resultsWithScores.Any())
+        var resultsWithVectorOnly = response.Results.Where(r =>
+            r.VectorScore.HasValue && r.VectorScore.Value > 0 &&
+            (!r.BM25Score.HasValue || r.BM25Score.Value == 0)).ToList();
+
+        var resultsWithBM25Only = response.Results.Where(r =>
+            r.BM25Score.HasValue && r.BM25Score.Value > 0 &&
+            (!r.VectorScore.HasValue || r.VectorScore.Value == 0)).ToList();
+
+        if (resultsWithBothScores.Any())
         {
-            resultsWithScores.Should().NotBeEmpty("hybrid search should provide both BM25 and vector scores");
             Console.WriteLine($"✅ Hybrid search found {response.Results.Count} results");
-            Console.WriteLine($"   Results with both scores: {resultsWithScores.Count}");
-            Console.WriteLine($"   Top result - BM25: {resultsWithScores.First().BM25Score:F3}, Vector: {resultsWithScores.First().VectorScore:F3}");
+            Console.WriteLine($"   Results with both BM25 and vector scores: {resultsWithBothScores.Count}");
+            Console.WriteLine($"   Results with vector score only: {resultsWithVectorOnly.Count}");
+            Console.WriteLine($"   Results with BM25 score only: {resultsWithBM25Only.Count}");
+            Console.WriteLine($"   Top result - BM25: {resultsWithBothScores.First().BM25Score:F3}, Vector: {resultsWithBothScores.First().VectorScore:F3}");
+        }
+        else if (resultsWithVectorOnly.Any())
+        {
+            Console.WriteLine($"✅ Hybrid search found {response.Results.Count} results (vector search only)");
+            Console.WriteLine($"   Results with vector score: {resultsWithVectorOnly.Count}");
+            Console.WriteLine($"   Top result - Vector: {resultsWithVectorOnly.First().VectorScore:F3}");
+            Console.WriteLine($"   Note: BM25 full-text search found no matches for this query");
+        }
+        else if (resultsWithBM25Only.Any())
+        {
+            Console.WriteLine($"✅ Hybrid search found {response.Results.Count} results (BM25 search only)");
+            Console.WriteLine($"   Results with BM25 score: {resultsWithBM25Only.Count}");
+            Console.WriteLine($"   Top result - BM25: {resultsWithBM25Only.First().BM25Score:F3}");
+            Console.WriteLine($"   Note: Vector search found no matches for this query (embedding service may be unavailable)");
         }
         else
         {
-            Console.WriteLine($"⚠️  Hybrid search found {response.Results.Count} results but no combined scores (embedding service may be unavailable)");
+            Console.WriteLine($"⚠️  Hybrid search found {response.Results.Count} results but no scores (this should not happen)");
         }
     }
 

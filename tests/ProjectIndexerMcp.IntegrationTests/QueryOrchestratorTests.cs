@@ -86,7 +86,7 @@ public class QueryOrchestratorTests : FixtureTestBase
     [Fact]
     public async Task EdgeRepository_GetOutgoingEdges_ShouldFindRelationships()
     {
-        // Arrange - Find QueryOrchestrator symbol
+        // Arrange - Find QueryOrchestrator.QueryAsync method (methods have edges, not the class itself)
         var symbol = await QueryAsync<Symbol>(@"
             SELECT id, repo_id AS RepositoryName, branch_name AS BranchName, commit_sha AS CommitSha,
                    file_path AS FilePath, name, qualified_name AS QualifiedName, kind, language,
@@ -94,22 +94,22 @@ public class QueryOrchestratorTests : FixtureTestBase
                    end_column AS EndColumn, signature, documentation, modifiers,
                    parent_symbol_id AS ParentSymbolId, indexed_at AS IndexedAt
             FROM symbols
-            WHERE qualified_name ILIKE @QualifiedName
+            WHERE qualified_name LIKE @QualifiedName
             LIMIT 1",
-            new { QualifiedName = "%QueryOrchestrator%" });
+            new { QualifiedName = "ProjectIndexerMcp.Services.QueryOrchestrator.QueryAsync%" });
 
-        var queryOrchestratorSymbol = symbol.FirstOrDefault();
-        queryOrchestratorSymbol.Should().NotBeNull();
+        var queryAsyncMethod = symbol.FirstOrDefault();
+        queryAsyncMethod.Should().NotBeNull("QueryOrchestrator.QueryAsync method should exist in the database");
 
         // Act - Get outgoing edges
         var edgeCount = await ExecuteScalarAsync<int>(
             "SELECT COUNT(*) FROM edges WHERE source_symbol_id = @SourceId",
-            new { SourceId = queryOrchestratorSymbol!.Id });
+            new { SourceId = queryAsyncMethod!.Id });
 
         // Assert
-        edgeCount.Should().BeGreaterThan(0, "QueryOrchestrator should have outgoing edges (calls, references, etc.)");
+        edgeCount.Should().BeGreaterThan(0, "QueryAsync method should have outgoing edges (calls to other methods)");
 
-        Console.WriteLine($"QueryOrchestrator has {edgeCount} outgoing edges");
+        Console.WriteLine($"QueryOrchestrator.QueryAsync has {edgeCount} outgoing edges");
     }
 
     [Fact]
