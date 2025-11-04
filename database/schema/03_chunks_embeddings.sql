@@ -1,5 +1,5 @@
 -- ============================================================================
--- PostgreSQL Chunks and Embeddings Tables for Project Indexer MCP
+-- PostgreSQL Chunks and Embeddings Tables for Lancer MCP
 -- ============================================================================
 -- This file creates tables for code chunks and their embeddings with pgvector
 -- support for semantic search using HNSW indexes.

@@ -1,6 +1,6 @@
-# Database Setup - Project Indexer MCP
+# Database Setup - Lancer MCP
 
-This directory contains the PostgreSQL database schema and migration scripts for the Project Indexer MCP service.
+This directory contains the PostgreSQL database schema and migration scripts for the Lancer MCP service.
 
 ## Overview
 
@@ -67,7 +67,7 @@ docker-compose logs -f postgres
 ```bash
 export DB_HOST=localhost
 export DB_PORT=5432
-export DB_NAME=project_indexer
+export DB_NAME=lancer
 export DB_USER=postgres
 export DB_PASSWORD=postgres
 ```
@@ -91,7 +91,7 @@ This will:
 
 ### 3. Verify Installation
 ```bash
-psql -h localhost -U postgres -d project_indexer
+psql -h localhost -U postgres -d lancer
 ```
 
 ```sql
@@ -327,7 +327,7 @@ VACUUM ANALYZE embeddings;
 ### Reindex
 ```sql
 -- Reindex all indexes
-REINDEX DATABASE project_indexer;
+REINDEX DATABASE lancer;
 
 -- Reindex specific index
 REINDEX INDEX idx_embeddings_vector_hnsw;
@@ -360,14 +360,14 @@ sudo apt-get install postgresql-16-pgvector
 ### Migration fails
 ```bash
 # Drop database and start over
-psql -U postgres -c "DROP DATABASE project_indexer;"
+psql -U postgres -c "DROP DATABASE lancer;"
 ./migrate.sh
 ```
 
 ### Slow queries
 ```sql
 -- Enable query logging
-ALTER DATABASE project_indexer SET log_min_duration_statement = 1000;
+ALTER DATABASE lancer SET log_min_duration_statement = 1000;
 
 -- Check slow queries
 SELECT * FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 10;

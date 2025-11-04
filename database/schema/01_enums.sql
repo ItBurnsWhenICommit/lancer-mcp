@@ -1,7 +1,7 @@
 -- ============================================================================
--- PostgreSQL Enums for Project Indexer MCP
+-- PostgreSQL Enums for Lancer MCP
 -- ============================================================================
--- This file defines enums that match the C# models in ProjectIndexerMcp/Models
+-- This file defines enums that match the C# models in LancerMcp/Models
 -- ============================================================================
 
 -- Programming language identifier

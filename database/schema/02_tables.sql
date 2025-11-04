@@ -1,5 +1,5 @@
 -- ============================================================================
--- PostgreSQL Tables for Project Indexer MCP
+-- PostgreSQL Tables for Lancer MCP
 -- ============================================================================
 -- This file creates the main tables for storing repository metadata, symbols,
 -- and relationships. Designed for efficient querying and graph traversal.

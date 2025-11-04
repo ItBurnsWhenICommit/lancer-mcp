@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# PostgreSQL Migration Script for Project Indexer MCP
+# PostgreSQL Migration Script for Lancer MCP
 # ============================================================================
 # This script runs all migration files in order to set up the database schema
 # ============================================================================
@@ -10,7 +10,7 @@ set -e  # Exit on error
 # Configuration
 DB_HOST="${DB_HOST:-localhost}"
 DB_PORT="${DB_PORT:-5432}"
-DB_NAME="${DB_NAME:-project_indexer}"
+DB_NAME="${DB_NAME:-lancer}"
 DB_USER="${DB_USER:-postgres}"
 DB_PASSWORD="${DB_PASSWORD:-postgres}"
 
@@ -61,9 +61,9 @@ create_database() {
 run_migration() {
     local file=$1
     local filename=$(basename $file)
-    
+
     print_info "Running migration: $filename"
-    
+
     if PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME -f $file; then
         print_info "✓ $filename completed successfully"
         return 0
@@ -76,37 +76,37 @@ run_migration() {
 # Main migration process
 main() {
     echo "============================================================================"
-    echo "PostgreSQL Migration for Project Indexer MCP"
+    echo "PostgreSQL Migration for Lancer MCP"
     echo "============================================================================"
     echo "Database: $DB_NAME"
     echo "Host: $DB_HOST:$DB_PORT"
     echo "User: $DB_USER"
     echo "============================================================================"
     echo ""
-    
+
     # Check PostgreSQL connection
     if ! check_postgres; then
         print_error "Migration aborted: Cannot connect to PostgreSQL"
         exit 1
     fi
-    
+
     # Create database
     create_database
-    
+
     # Get script directory
     SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
     SCHEMA_DIR="$SCRIPT_DIR/schema"
-    
+
     # Check if schema directory exists
     if [ ! -d "$SCHEMA_DIR" ]; then
         print_error "Schema directory not found: $SCHEMA_DIR"
         exit 1
     fi
-    
+
     # Run migrations in order
     print_info "Running migrations from: $SCHEMA_DIR"
     echo ""
-    
+
     local migration_files=(
         "00_extensions.sql"
         "01_enums.sql"
@@ -115,26 +115,26 @@ main() {
         "04_functions.sql"
         "05_materialized_views.sql"
     )
-    
+
     local failed=0
-    
+
     for file in "${migration_files[@]}"; do
         local filepath="$SCHEMA_DIR/$file"
-        
+
         if [ ! -f "$filepath" ]; then
             print_warn "Migration file not found: $file (skipping)"
             continue
         fi
-        
+
         if ! run_migration "$filepath"; then
             failed=1
             break
         fi
         echo ""
     done
-    
+
     echo "============================================================================"
-    
+
     if [ $failed -eq 0 ]; then
         print_info "All migrations completed successfully! ✓"
         echo ""

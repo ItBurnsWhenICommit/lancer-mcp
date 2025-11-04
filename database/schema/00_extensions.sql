@@ -1,5 +1,5 @@
 -- ============================================================================
--- PostgreSQL Extensions for Project Indexer MCP
+-- PostgreSQL Extensions for Lancer MCP
 -- ============================================================================
 -- This file sets up the required PostgreSQL extensions for:
 -- - Vector similarity search (pgvector)

@@ -1,6 +1,6 @@
 # Storage Layer Setup Guide
 
-This guide explains how to set up and test the PostgreSQL storage layer for the Project Indexer MCP service.
+This guide explains how to set up and test the PostgreSQL storage layer for the Lancer MCP service.
 
 ## Prerequisites
 
@@ -21,7 +21,7 @@ docker compose up -d
 
 This will:
 - Start PostgreSQL 16 with pgvector extension
-- Create the `project_indexer` database
+- Create the `lancer` database
 - Run all migration scripts automatically
 - Expose PostgreSQL on port 5432
 
@@ -43,7 +43,7 @@ The application is now configured to connect to the database automatically. The 
 {
   "DatabaseHost": "localhost",
   "DatabasePort": 5432,
-  "DatabaseName": "project_indexer",
+  "DatabaseName": "lancer",
   "DatabaseUser": "postgres",
   "DatabasePassword": "postgres",
   "DatabaseMaxPoolSize": 100,
@@ -56,7 +56,7 @@ Build and run the application:
 
 ```bash
 dotnet build
-dotnet run --project ProjectIndexerMcp
+dotnet run --project LancerMcp
 ```
 
 ### 4. Test Database Connectivity

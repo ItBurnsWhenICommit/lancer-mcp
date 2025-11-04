@@ -1,0 +1,30 @@
+﻿Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LancerMcp", "LancerMcp\LancerMcp.csproj", "{09504C61-9A0E-7C8E-341F-26300F64044B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LancerMcp.Tests", "LancerMcp.Tests\LancerMcp.Tests.csproj", "{BC323B8A-2C9F-4623-90EC-CE378AAF6FEB}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{09504C61-9A0E-7C8E-341F-26300F64044B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{09504C61-9A0E-7C8E-341F-26300F64044B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{09504C61-9A0E-7C8E-341F-26300F64044B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{09504C61-9A0E-7C8E-341F-26300F64044B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BC323B8A-2C9F-4623-90EC-CE378AAF6FEB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BC323B8A-2C9F-4623-90EC-CE378AAF6FEB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BC323B8A-2C9F-4623-90EC-CE378AAF6FEB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BC323B8A-2C9F-4623-90EC-CE378AAF6FEB}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {75254FC2-E59A-4356-AD56-8F383F4CB483}
+	EndGlobalSection
+EndGlobal

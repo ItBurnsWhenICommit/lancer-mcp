@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the testing strategy for the Project Indexer MCP server, including the use of pre-indexed fixtures for fast, reproducible integration tests.
+This document describes the testing strategy for the Lancer MCP server, including the use of pre-indexed fixtures for fast, reproducible integration tests.
 
 ## Testing Philosophy
 
@@ -39,7 +39,7 @@ This keeps the repository lightweight while allowing developers to generate fixt
 
 | Repository | Language | Size | Purpose |
 |------------|----------|------|---------|
-| **project-indexer-mcp** | C# | ~50-100 files | Self-test, verify core functionality |
+| **lancer-mcp** | C# | ~50-100 files | Self-test, verify core functionality |
 | **Pulsar4x** | C# | ~500+ files | Scalability, performance, complex queries |
 
 ### Fixture Contents
@@ -53,21 +53,21 @@ Each fixture includes:
 ## Directory Structure
 
 ```
-project-indexer-mcp/
+lancer-mcp/
 ├── scripts/
 │   ├── refresh-fixtures.sh      # Generate new fixtures
 │   └── restore-fixtures.sh      # Restore fixtures for testing
 ├── tests/
 │   ├── fixtures/
 │   │   ├── repos/               # Git mirrors
-│   │   │   ├── project-indexer-mcp.git/
+│   │   │   ├── lancer-mcp.git/
 │   │   │   └── Pulsar4x.git/
 │   │   ├── dumps/               # PostgreSQL dumps
-│   │   │   ├── project_indexer_YYYYMMDD_HHMMSS.dump
-│   │   │   ├── project_indexer_YYYYMMDD_HHMMSS.metadata.json
-│   │   │   └── project_indexer_latest.dump -> (symlink)
+│   │   │   ├── lancer_YYYYMMDD_HHMMSS.dump
+│   │   │   ├── lancer_YYYYMMDD_HHMMSS.metadata.json
+│   │   │   └── lancer_latest.dump -> (symlink)
 │   │   └── README.md
-│   └── ProjectIndexerMcp.IntegrationTests/
+│   └── LancerMcp.IntegrationTests/
 │       ├── FixtureTestBase.cs   # Base class for tests
 │       ├── QueryOrchestratorTests.cs
 │       └── README.md
@@ -101,14 +101,14 @@ project-indexer-mcp/
 
 3. **When prompted, configure repositories in appsettings.json:**
 
-   Edit `ProjectIndexerMcp/appsettings.json`:
+   Edit `LancerMcp/appsettings.json`:
 
    ```json
    {
      "Repositories": [
        {
-         "Name": "project-indexer-mcp",
-         "RemoteUrl": "file:///absolute/path/to/tests/fixtures/repos/project-indexer-mcp.git",
+         "Name": "lancer-mcp",
+         "RemoteUrl": "file:///absolute/path/to/tests/fixtures/repos/lancer-mcp.git",
          "DefaultBranch": "main"
        },
        {
@@ -122,7 +122,7 @@ project-indexer-mcp/
 
 4. **Start the MCP server:**
    ```bash
-   dotnet run --project ProjectIndexerMcp/ProjectIndexerMcp.csproj -c Release
+   dotnet run --project LancerMcp/LancerMcp.csproj -c Release
    ```
 
    The server will automatically index the default branches on startup.
@@ -139,12 +139,12 @@ project-indexer-mcp/
 ```
 tests/fixtures/
 ├── repos/
-│   ├── project-indexer-mcp.git/
+│   ├── lancer-mcp.git/
 │   └── Pulsar4x.git/
 └── dumps/
-    ├── project_indexer_20251029_123456.dump
-    ├── project_indexer_20251029_123456.metadata.json
-    └── project_indexer_latest.dump -> project_indexer_20251029_123456.dump
+    ├── lancer_20251029_123456.dump
+    ├── lancer_20251029_123456.metadata.json
+    └── lancer_latest.dump -> lancer_20251029_123456.dump
 ```
 
 ## Running Integration Tests
@@ -156,19 +156,19 @@ tests/fixtures/
 ./scripts/restore-fixtures.sh
 
 # Export environment variables (shown in script output)
-export TEST_DB_NAME=project_indexer_test
-export TEST_WORKING_DIR=/tmp/project-indexer-test-XXXXXX
+export TEST_DB_NAME=lancer_test
+export TEST_WORKING_DIR=/tmp/lancer-test-XXXXXX
 
 # Run tests
-dotnet test tests/ProjectIndexerMcp.IntegrationTests --filter Category=Integration
+dotnet test tests/LancerMcp.IntegrationTests --filter Category=Integration
 ```
 
 ### Option 2: Manual Setup
 
 ```bash
 # Set environment variables
-export TEST_DB_NAME=project_indexer_test
-export TEST_WORKING_DIR=/tmp/project-indexer-test
+export TEST_DB_NAME=lancer_test
+export TEST_WORKING_DIR=/tmp/lancer-test
 export DB_HOST=localhost
 export DB_PORT=5432
 export DB_USER=postgres
@@ -181,14 +181,14 @@ docker compose up -d
 # Restore database
 docker compose exec -T postgres psql -U postgres -c "CREATE DATABASE $TEST_DB_NAME;"
 docker compose exec -T postgres pg_restore -U postgres -d $TEST_DB_NAME \
-  < ../tests/fixtures/dumps/project_indexer_latest.dump
+  < ../tests/fixtures/dumps/lancer_latest.dump
 
 # Copy Git mirrors
 mkdir -p $TEST_WORKING_DIR
 cp -r tests/fixtures/repos/*.git $TEST_WORKING_DIR/
 
 # Run tests
-dotnet test tests/ProjectIndexerMcp.IntegrationTests --filter Category=Integration
+dotnet test tests/LancerMcp.IntegrationTests --filter Category=Integration
 ```
 
 ## Writing Integration Tests
@@ -196,7 +196,7 @@ dotnet test tests/ProjectIndexerMcp.IntegrationTests --filter Category=Integrati
 ### 1. Inherit from FixtureTestBase
 
 ```csharp
-using ProjectIndexerMcp.IntegrationTests;
+using LancerMcp.IntegrationTests;
 using Xunit;
 
 [Trait("Category", "Integration")]
@@ -228,7 +228,7 @@ await ExecuteAsync("UPDATE symbols SET indexed_at = NOW() WHERE id = @Id",
 var count = await ExecuteScalarAsync<int>("SELECT COUNT(*) FROM symbols");
 
 // Get repository statistics
-var stats = await GetRepositoryStatsAsync("project-indexer-mcp");
+var stats = await GetRepositoryStatsAsync("lancer-mcp");
 ```
 
 ### 3. Test Realistic Scenarios
@@ -279,7 +279,7 @@ The `.github/workflows/integration-tests.yml` workflow:
 
 Fixtures are cached based on:
 - Database schema files (`database/schema/**`)
-- Indexing service code (`ProjectIndexerMcp/Services/**`)
+- Indexing service code (`LancerMcp/Services/**`)
 
 When these change, fixtures are regenerated.
 

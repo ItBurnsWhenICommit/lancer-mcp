@@ -21,8 +21,8 @@ The test fixtures consist of:
 
 The fixtures include two repositories:
 
-1. **project-indexer-mcp** - This project itself (self-test)
-   - URL: https://github.com/ItBurnsWhenICommit/project-indexer-mcp.git
+1. **lancer-mcp** - This project itself (self-test)
+   - URL: https://github.com/ItBurnsWhenICommit/lancer-mcp.git
    - Language: C#
    - Purpose: Verify the system can index itself
 
@@ -36,12 +36,12 @@ The fixtures include two repositories:
 ```
 tests/fixtures/
 ├── repos/                          # Git mirrors (bare repositories)
-│   ├── project-indexer-mcp.git/   # This project's mirror
+│   ├── lancer-mcp.git/            # This project's mirror
 │   └── Pulsar4x.git/              # Pulsar4x mirror
 ├── dumps/                          # PostgreSQL dumps
-│   ├── project_indexer_YYYYMMDD_HHMMSS.dump
-│   ├── project_indexer_YYYYMMDD_HHMMSS.metadata.json
-│   └── project_indexer_latest.dump -> (symlink to latest)
+│   ├── lancer_YYYYMMDD_HHMMSS.dump
+│   ├── lancer_YYYYMMDD_HHMMSS.metadata.json
+│   └── lancer_latest.dump -> (symlink to latest)
 └── README.md                       # This file
 ```
 
@@ -78,19 +78,19 @@ When the script prompts you, follow these steps:
 
 1. **Start the MCP server:**
    ```bash
-   dotnet run --project ProjectIndexerMcp/ProjectIndexerMcp.csproj -c Release
+   dotnet run --project LancerMcp/LancerMcp.csproj -c Release
    ```
 
 2. **Configure repositories in appsettings.json:**
 
-   Edit `ProjectIndexerMcp/appsettings.json` to add the fixture repositories:
+   Edit `LancerMcp/appsettings.json` to add the fixture repositories:
 
    ```json
    {
      "Repositories": [
        {
-         "Name": "project-indexer-mcp",
-         "RemoteUrl": "file:///absolute/path/to/tests/fixtures/repos/project-indexer-mcp.git",
+         "Name": "lancer-mcp",
+         "RemoteUrl": "file:///absolute/path/to/tests/fixtures/repos/lancer-mcp.git",
          "DefaultBranch": "main"
        },
        {
@@ -107,7 +107,7 @@ When the script prompts you, follow these steps:
 3. **Start the MCP server:**
 
    ```bash
-   dotnet run --project ProjectIndexerMcp/ProjectIndexerMcp.csproj -c Release
+   dotnet run --project LancerMcp/LancerMcp.csproj -c Release
    ```
 
    The server will automatically:
@@ -120,7 +120,7 @@ When the script prompts you, follow these steps:
 
    Monitor the server logs for completion messages:
    ```
-   [INFO] Indexed 1234 files from project-indexer-mcp/main
+   [INFO] Indexed 1234 files from lancer-mcp/main
    [INFO] Generated 5678 embeddings
    [INFO] Completed automatic indexing of default branches
    ```
@@ -134,17 +134,17 @@ When the script prompts you, follow these steps:
 ```bash
 # Using Docker Compose
 cd database
-docker compose exec -T postgres pg_restore -U postgres -d test_db < ../tests/fixtures/dumps/project_indexer_latest.dump
+docker compose exec -T postgres pg_restore -U postgres -d test_db < ../tests/fixtures/dumps/lancer_latest.dump
 
 # Or using pg_restore directly
-pg_restore -U postgres -d test_db tests/fixtures/dumps/project_indexer_latest.dump
+pg_restore -U postgres -d test_db tests/fixtures/dumps/lancer_latest.dump
 ```
 
 ### Copy Git Mirrors
 
 ```bash
 # Copy to test working directory
-cp -r tests/fixtures/repos/project-indexer-mcp.git /tmp/test-working-dir/
+cp -r tests/fixtures/repos/lancer-mcp.git /tmp/test-working-dir/
 cp -r tests/fixtures/repos/Pulsar4x.git /tmp/test-working-dir/
 ```
 
@@ -155,7 +155,7 @@ cp -r tests/fixtures/repos/Pulsar4x.git /tmp/test-working-dir/
 public async Task TestHybridSearch_WithFixtures()
 {
     // 1. Restore database from fixture
-    await RestoreDatabaseDump("tests/fixtures/dumps/project_indexer_latest.dump");
+    await RestoreDatabaseDump("tests/fixtures/dumps/lancer_latest.dump");
     
     // 2. Copy Git mirrors to temp directory
     var workingDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
@@ -165,8 +165,8 @@ public async Task TestHybridSearch_WithFixtures()
     var server = await StartMcpServer(workingDir, skipIndexing: true);
     
     // 4. Execute test queries
-    var result = await server.Query("find all classes in project-indexer-mcp");
-    
+    var result = await server.Query("find all classes in lancer-mcp");
+
     // 5. Assert results
     Assert.NotEmpty(result.Results);
     Assert.Contains(result.Results, r => r.SymbolName == "QueryOrchestrator");
@@ -185,9 +185,9 @@ Each dump has an accompanying `.metadata.json` file with:
   "created_at": "2025-10-29T12:34:56Z",
   "repositories": [
     {
-      "name": "project-indexer-mcp",
-      "url": "https://github.com/ItBurnsWhenICommit/project-indexer-mcp.git",
-      "mirror_path": "tests/fixtures/repos/project-indexer-mcp.git"
+      "name": "lancer-mcp",
+      "url": "https://github.com/ItBurnsWhenICommit/lancer-mcp.git",
+      "mirror_path": "tests/fixtures/repos/lancer-mcp.git"
     }
   ],
   "statistics": {
@@ -196,8 +196,8 @@ Each dump has an accompanying `.metadata.json` file with:
     "embeddings": 5678
   },
   "database": {
-    "name": "project_indexer",
-    "dump_file": "project_indexer_20251029_123456.dump"
+    "name": "lancer",
+    "dump_file": "lancer_20251029_123456.dump"
   }
 }
 ```
@@ -249,7 +249,7 @@ The indexing step may have failed. Check:
 Ensure schema versions match:
 ```bash
 # Check dump version
-pg_restore -l tests/fixtures/dumps/project_indexer_latest.dump | head
+pg_restore -l tests/fixtures/dumps/lancer_latest.dump | head
 
 # Ensure migrations are current
 cd database
@@ -261,7 +261,7 @@ docker compose exec -T postgres psql -U postgres -d test_db < schema/00_extensio
 
 Update mirrors manually:
 ```bash
-cd tests/fixtures/repos/project-indexer-mcp.git
+cd tests/fixtures/repos/lancer-mcp.git
 git fetch --all --prune
 ```
 

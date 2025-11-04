@@ -1,4 +1,4 @@
-# Architecture - Project Indexer MCP
+# Architecture - Lancer MCP
 
 ## Core Principle: ONE Tool for Agents
 
@@ -204,7 +204,7 @@ docker run -d --name text-embeddings -p 8080:80 \
 
 # Configure repositories in appsettings.json
 # Then start the server
-dotnet run --project ProjectIndexerMcp/ProjectIndexerMcp.csproj
+dotnet run --project LancerMcp/LancerMcp.csproj
 
 # Query the index with natural language
 curl -X POST http://localhost:5171/mcp \

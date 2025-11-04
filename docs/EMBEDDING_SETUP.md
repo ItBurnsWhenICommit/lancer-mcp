@@ -4,7 +4,7 @@ This document explains how to set up the Text Embeddings Inference (TEI) service
 
 ## Overview
 
-The Project Indexer MCP uses **Hugging Face Text Embeddings Inference (TEI)** to generate embeddings for code chunks. TEI is a high-performance, production-ready embedding service that supports the **jina-embeddings-v2-base-code** model.
+Lancer MCP uses **Hugging Face Text Embeddings Inference (TEI)** to generate embeddings for code chunks. TEI is a high-performance, production-ready embedding service that supports the **jina-embeddings-v2-base-code** model.
 
 ### Model Specifications
 
@@ -74,7 +74,7 @@ docker run -p 8080:80 -v $volume:/data --pull always \
 
 ## Configuration
 
-### Project Indexer MCP Configuration
+### Lancer MCP Configuration
 
 Update your `appsettings.json`:
 

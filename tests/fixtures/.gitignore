@@ -1,15 +1,26 @@
-# Ignore large dump files (commit only the latest or specific versions)
+# ============================================================================
+# Test Fixtures .gitignore
+# ============================================================================
+# Fixtures are generated locally using scripts/refresh-fixtures.sh
+# They are NOT committed to the repository due to their size
+# ============================================================================
+
+# Ignore all database dump files (large binary files)
 dumps/*.dump
 
-# Keep metadata files
-!dumps/*.metadata.json
+# Ignore metadata files (can be regenerated)
+dumps/*.metadata.json
 
-# Keep the repos directory structure but ignore the actual Git data
-# (Users should run refresh-fixtures.sh to populate)
+# Keep the directory structure
+!dumps/.gitkeep
+
+# Ignore all Git mirror repositories (large binary data)
 repos/*
 !repos/.gitkeep
 
-# Allow specific committed fixtures if needed
-# Uncomment to commit a specific dump:
-# !dumps/project_indexer_baseline.dump
-
+# ============================================================================
+# Optional: Commit specific baseline fixtures
+# ============================================================================
+# Uncomment to commit a specific baseline dump for CI/CD:
+# !dumps/lancer_baseline.dump
+# !dumps/lancer_baseline.metadata.json

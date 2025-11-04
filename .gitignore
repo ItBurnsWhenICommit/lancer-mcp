@@ -1,4 +1,55 @@
-bin
-obj
-repositories
-embedding-data
+# Build outputs
+bin/
+obj/
+
+# Runtime data directories
+repositories/
+embedding-data/
+
+# Temporary test directories
+/tmp/lancer-test-*/
+
+# IDE and editor files
+.vs/
+.vscode/settings.json
+.vscode/launch.json
+*.swp
+*.swo
+*~
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# User-specific files
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# NuGet packages
+*.nupkg
+*.snupkg
+packages/
+.nuget/
+
+# Test results
+TestResults/
+*.trx
+*.coverage
+*.coveragexml
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+*.log
+logs/
+
+# Environment files
+.env
+.env.local
+.env.*.local

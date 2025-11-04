@@ -1,0 +1,19 @@
+# ============================================================================
+# Database .gitignore
+# ============================================================================
+# Ignore Docker volumes and runtime data
+# ============================================================================
+
+# Docker volume data (PostgreSQL data directory)
+postgres_data/
+pgdata/
+
+# Backup files
+*.backup
+*.bak
+*.sql.gz
+
+# Temporary SQL files
+temp*.sql
+scratch*.sql
+

@@ -8,8 +8,8 @@
 set -e
 
 # Configuration
-CONTAINER_NAME="${CONTAINER_NAME:-project-indexer-postgres}"
-DB_NAME="${DB_NAME:-project_indexer}"
+CONTAINER_NAME="${CONTAINER_NAME:-lancer-postgres}"
+DB_NAME="${DB_NAME:-lancer}"
 DB_USER="${DB_USER:-postgres}"
 
 # Colors

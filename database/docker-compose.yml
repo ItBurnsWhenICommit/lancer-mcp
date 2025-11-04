@@ -3,11 +3,11 @@ version: '3.8'
 services:
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: project-indexer-postgres
+    container_name: lancer-postgres
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: project_indexer
+      POSTGRES_DB: lancer
     ports:
       - "5432:5432"
     volumes:

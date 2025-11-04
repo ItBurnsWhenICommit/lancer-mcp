@@ -33,15 +33,15 @@ log_error() {
 }
 
 # Configuration
-TEST_DB_NAME="${TEST_DB_NAME:-project_indexer_test}"
+TEST_DB_NAME="${TEST_DB_NAME:-lancer_test}"
 DB_USER="${DB_USER:-postgres}"
 DB_PASSWORD="${DB_PASSWORD:-postgres}"
 DB_HOST="${DB_HOST:-localhost}"
 DB_PORT="${DB_PORT:-5432}"
-TEST_WORKING_DIR="${TEST_WORKING_DIR:-/tmp/project-indexer-test-$(date +%s)}"
+TEST_WORKING_DIR="${TEST_WORKING_DIR:-/tmp/lancer-test-$(date +%s)}"
 
 # Parse arguments
-DUMP_FILE="${1:-$DUMPS_DIR/project_indexer_latest.dump}"
+DUMP_FILE="${1:-$DUMPS_DIR/lancer_latest.dump}"
 
 if [ ! -f "$DUMP_FILE" ]; then
     log_error "Dump file not found: $DUMP_FILE"

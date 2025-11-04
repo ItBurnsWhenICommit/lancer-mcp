@@ -1,6 +1,6 @@
 # Query Orchestration Guide
 
-This guide explains how the hybrid query orchestration system works in the Project Indexer MCP service.
+This guide explains how the hybrid query orchestration system works in the Lancer MCP service.
 
 ## Overview
 

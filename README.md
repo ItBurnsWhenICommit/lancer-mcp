@@ -2,9 +2,9 @@
   <img src="lancerLogo.png" alt="LANCER Logo" width="350"/>
 </p>
 
-# Project Indexer MCP
+# Lancer MCP
 
-A self-hosted MCP (Model Context Protocol) server that indexes Git repositories and provides intelligent code search for AI agents using hybrid search (BM25 + vector embeddings + graph traversal).
+**LAN**-hosted Code Ind**exer** - A self-hosted MCP (Model Context Protocol) server that indexes Git repositories and provides intelligent code search for AI agents using hybrid search (BM25 + vector embeddings + graph traversal).
 
 ## 🎯 What is this?
 
@@ -38,9 +38,9 @@ This project was born out of both curiosity and necessity.
 ### 1. Clone and Build
 
 ```bash
-git clone https://github.com/ItBurnsWhenICommit/project-indexer-mcp.git
-cd project-indexer-mcp
-dotnet build ProjectIndexerMcp/ProjectIndexerMcp.csproj
+git clone https://github.com/ItBurnsWhenICommit/lancer-mcp.git
+cd lancer-mcp
+dotnet build LancerMcp/LancerMcp.csproj
 ```
 
 ### 2. Start Database
@@ -69,7 +69,7 @@ For GPU mode, see [docs/EMBEDDING_SETUP.md](docs/EMBEDDING_SETUP.md).
 
 ### 4. Configure
 
-Edit `ProjectIndexerMcp/appsettings.json` to add your repositories:
+Edit `LancerMcp/appsettings.json` to add your repositories:
 
 ```json
 {
@@ -86,7 +86,7 @@ Edit `ProjectIndexerMcp/appsettings.json` to add your repositories:
 ### 5. Run
 
 ```bash
-dotnet run --project ProjectIndexerMcp/ProjectIndexerMcp.csproj
+dotnet run --project LancerMcp/LancerMcp.csproj
 ```
 
 The server will:
@@ -223,8 +223,8 @@ Return to AI Agent
 
 ### Testing
 - [Testing Strategy](docs/TESTING_STRATEGY.md) - Fixture-based integration testing
-- [Unit Tests](ProjectIndexerMcp.Tests/README.md) - Running unit tests
-- [Integration Tests](tests/ProjectIndexerMcp.IntegrationTests/README.md) - Running integration tests
+- [Unit Tests](LancerMcp.Tests/README.md) - Running unit tests
+- [Integration Tests](tests/LancerMcp.IntegrationTests/README.md) - Running integration tests
 
 ### Reference
 - [Database Quick Reference](database/QUICK_REFERENCE.md) - Common SQL queries
@@ -234,7 +234,7 @@ Return to AI Agent
 
 ### Unit Tests
 ```bash
-dotnet test ProjectIndexerMcp.Tests
+dotnet test LancerMcp.Tests
 ```
 
 ### Integration Tests
@@ -244,9 +244,9 @@ dotnet test ProjectIndexerMcp.Tests
 
 # Restore fixtures and run tests
 ./scripts/restore-fixtures.sh
-export TEST_DB_NAME=project_indexer_test
-export TEST_WORKING_DIR=/tmp/project-indexer-test-XXXXXX
-dotnet test tests/ProjectIndexerMcp.IntegrationTests --filter Category=Integration
+export TEST_DB_NAME=lancer_test
+export TEST_WORKING_DIR=/tmp/lancer-test-XXXXXX
+dotnet test tests/LancerMcp.IntegrationTests --filter Category=Integration
 ```
 
 See [Testing Strategy](docs/TESTING_STRATEGY.md) for details.
@@ -266,7 +266,7 @@ Key settings in `appsettings.json`:
   ],
   "DatabaseHost": "localhost",
   "DatabasePort": 5432,
-  "DatabaseName": "project_indexer",
+  "DatabaseName": "lancer",
   "EmbeddingServiceUrl": "http://localhost:8080",
   "EmbeddingBatchSize": 16,
   "EmbeddingTimeoutSeconds": 300

@@ -1,5 +1,5 @@
 -- ============================================================================
--- PostgreSQL Materialized Views for Project Indexer MCP
+-- PostgreSQL Materialized Views for Lancer MCP
 -- ============================================================================
 -- This file creates materialized views for optimized queries and statistics.
 -- Materialized views cache complex query results for faster access.

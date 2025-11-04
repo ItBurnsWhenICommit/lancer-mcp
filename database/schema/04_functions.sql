@@ -1,5 +1,5 @@
 -- ============================================================================
--- PostgreSQL Functions for Project Indexer MCP
+-- PostgreSQL Functions for Lancer MCP
 -- ============================================================================
 -- This file creates helper functions for hybrid search, BM25 ranking,
 -- graph traversal, and query orchestration.

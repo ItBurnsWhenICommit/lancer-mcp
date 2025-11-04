@@ -35,11 +35,11 @@ log_error() {
 
 # Configuration
 REPOS=(
-    "https://github.com/ItBurnsWhenICommit/project-indexer-mcp.git"
+    "https://github.com/ItBurnsWhenICommit/lancer-mcp.git"
     "https://github.com/Pulsar4xDevs/Pulsar4x.git"
 )
 
-DB_NAME="project_indexer"
+DB_NAME="lancer"
 DB_USER="postgres"
 DB_PASSWORD="postgres"
 DB_HOST="localhost"
@@ -113,16 +113,16 @@ log_info "✓ Database schema initialized"
 # Step 4: Build and run MCP server to index repositories
 log_info "Step 4: Building MCP server..."
 cd "$PROJECT_ROOT"
-dotnet build ProjectIndexerMcp/ProjectIndexerMcp.csproj -c Release
+dotnet build LancerMcp/LancerMcp.csproj -c Release
 
 log_info "Step 5: Configuring and indexing repositories..."
 log_warn "NOTE: This step requires manual intervention:"
-log_warn "1. Configure repositories in ProjectIndexerMcp/appsettings.json:"
+log_warn "1. Configure repositories in LancerMcp/appsettings.json:"
 log_warn ""
 log_warn "   \"Repositories\": ["
 log_warn "     {"
-log_warn "       \"Name\": \"project-indexer-mcp\","
-log_warn "       \"RemoteUrl\": \"file://$REPOS_DIR/project-indexer-mcp.git\","
+log_warn "       \"Name\": \"lancer-mcp\","
+log_warn "       \"RemoteUrl\": \"file://$REPOS_DIR/lancer-mcp.git\","
 log_warn "       \"DefaultBranch\": \"main\""
 log_warn "     },"
 log_warn "     {"
@@ -133,7 +133,7 @@ log_warn "     }"
 log_warn "   ]"
 log_warn ""
 log_warn "2. Start the MCP server:"
-log_warn "   dotnet run --project ProjectIndexerMcp/ProjectIndexerMcp.csproj -c Release"
+log_warn "   dotnet run --project LancerMcp/LancerMcp.csproj -c Release"
 log_warn ""
 log_warn "3. The server will automatically index the default branches on startup"
 log_warn "4. Wait for indexing to complete (check logs for 'Completed automatic indexing')"
@@ -166,8 +166,8 @@ log_info "Step 7: Creating database dump..."
 mkdir -p "$DUMPS_DIR"
 
 timestamp=$(date +%Y%m%d_%H%M%S)
-dump_file="$DUMPS_DIR/project_indexer_${timestamp}.dump"
-latest_link="$DUMPS_DIR/project_indexer_latest.dump"
+dump_file="$DUMPS_DIR/lancer_${timestamp}.dump"
+latest_link="$DUMPS_DIR/lancer_latest.dump"
 
 docker compose exec -T postgres pg_dump -U "$DB_USER" -d "$DB_NAME" --format=custom > "$dump_file"
 
@@ -180,16 +180,16 @@ log_info "✓ Latest dump symlink: $latest_link"
 
 # Step 8: Create metadata file
 log_info "Step 8: Creating metadata file..."
-metadata_file="$DUMPS_DIR/project_indexer_${timestamp}.metadata.json"
+metadata_file="$DUMPS_DIR/lancer_${timestamp}.metadata.json"
 
 cat > "$metadata_file" <<EOF
 {
   "created_at": "$(date -Iseconds)",
   "repositories": [
     {
-      "name": "project-indexer-mcp",
-      "url": "https://github.com/ItBurnsWhenICommit/project-indexer-mcp.git",
-      "mirror_path": "$REPOS_DIR/project-indexer-mcp.git"
+      "name": "lancer-mcp",
+      "url": "https://github.com/ItBurnsWhenICommit/lancer-mcp.git",
+      "mirror_path": "$REPOS_DIR/lancer-mcp.git"
     },
     {
       "name": "Pulsar4x",

@@ -214,7 +214,7 @@ VACUUM ANALYZE symbols;
 ### Reindex
 ```sql
 -- Reindex all indexes
-REINDEX DATABASE project_indexer;
+REINDEX DATABASE lancer;
 
 -- Reindex specific index
 REINDEX INDEX idx_embeddings_vector_hnsw;
@@ -397,7 +397,7 @@ COPY code_chunks FROM '/path/to/data.csv' WITH (FORMAT csv, HEADER true);
 
 ```bash
 # Connect to database
-psql -h localhost -U postgres -d project_indexer
+psql -h localhost -U postgres -d lancer
 
 # List tables
 \dt

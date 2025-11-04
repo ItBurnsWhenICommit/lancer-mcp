@@ -33,7 +33,7 @@
         "files.trimTrailingWhitespace": false
     },
     // .NET settings
-    "dotnet.defaultSolution": "project-indexer-mcp.sln",
+    "dotnet.defaultSolution": "lancer-mcp.sln",
     "omnisharp.enableEditorConfigSupport": true,
     // File associations
     "files.associations": {
