@@ -6,6 +6,8 @@
 
 A self-hosted MCP (Model Context Protocol) server that indexes Git repositories and provides intelligent code search for AI agents using hybrid search (BM25 + vector embeddings + graph traversal).
 
+⚠️ My personal project and work in progress, things might not work ⚠️
+
 ## 🎯 What is this?
 
 This is a **LAN-hosted MCP server** written in C#/.NET that:
