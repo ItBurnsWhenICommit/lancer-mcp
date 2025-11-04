@@ -4,7 +4,7 @@
 
 # Lancer MCP
 
-**LAN**-hosted Code Ind**exer** - A self-hosted MCP (Model Context Protocol) server that indexes Git repositories and provides intelligent code search for AI agents using hybrid search (BM25 + vector embeddings + graph traversal).
+A self-hosted MCP (Model Context Protocol) server that indexes Git repositories and provides intelligent code search for AI agents using hybrid search (BM25 + vector embeddings + graph traversal).
 
 ## 🎯 What is this?
 
