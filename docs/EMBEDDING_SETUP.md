@@ -36,6 +36,7 @@ volume=$PWD/data
 docker run --gpus all -p 8080:80 -v $volume:/data --pull always \
   ghcr.io/huggingface/text-embeddings-inference:1.8 \
   --model-id $model
+
 ```
 
 ### 2. Verify the Service is Running
