@@ -180,6 +180,12 @@ public sealed class RoslynParserService
             var signature = $"{node.Identifier.Text}({string.Join(", ", node.ParameterList.Parameters.Select(p => $"{p.Type} {p.Identifier}"))})";
             var symbol = CreateSymbol(node.Identifier, Models.SymbolKind.Method, node, node.Modifiers, signature);
 
+            // Extract return type edge
+            ExtractTypeEdge(node.ReturnType, symbol.Id, EdgeKind.Returns);
+
+            // Extract parameter type edges
+            ExtractParameterTypeEdges(node.ParameterList, symbol.Id);
+
             // Extract method calls
             ExtractMethodCalls(node.Body, symbol.Id);
 
@@ -191,6 +197,9 @@ public sealed class RoslynParserService
             var signature = $"{node.Identifier.Text}({string.Join(", ", node.ParameterList.Parameters.Select(p => $"{p.Type} {p.Identifier}"))})";
             var symbol = CreateSymbol(node.Identifier, Models.SymbolKind.Constructor, node, node.Modifiers, signature);
 
+            // Extract parameter type edges
+            ExtractParameterTypeEdges(node.ParameterList, symbol.Id);
+
             ExtractMethodCalls(node.Body, symbol.Id);
 
             base.VisitConstructorDeclaration(node);
@@ -198,7 +207,11 @@ public sealed class RoslynParserService
 
         public override void VisitPropertyDeclaration(PropertyDeclarationSyntax node)
         {
-            CreateSymbol(node.Identifier, Models.SymbolKind.Property, node, node.Modifiers);
+            var symbol = CreateSymbol(node.Identifier, Models.SymbolKind.Property, node, node.Modifiers);
+
+            // Extract property type edge
+            ExtractTypeEdge(node.Type, symbol.Id, EdgeKind.TypeOf);
+
             base.VisitPropertyDeclaration(node);
         }
 
@@ -206,7 +219,10 @@ public sealed class RoslynParserService
         {
             foreach (var variable in node.Declaration.Variables)
             {
-                CreateSymbol(variable.Identifier, Models.SymbolKind.Field, node, node.Modifiers);
+                var symbol = CreateSymbol(variable.Identifier, Models.SymbolKind.Field, node, node.Modifiers);
+
+                // Extract field type edge
+                ExtractTypeEdge(node.Declaration.Type, symbol.Id, EdgeKind.TypeOf);
             }
             base.VisitFieldDeclaration(node);
         }
@@ -346,6 +362,83 @@ public sealed class RoslynParserService
                         CommitSha = _commitSha
                     };
                     _edges.Add(edge);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Extracts a type edge from a type syntax node (for fields, properties, return types).
+        /// </summary>
+        private void ExtractTypeEdge(TypeSyntax typeSyntax, string sourceSymbolId, EdgeKind edgeKind)
+        {
+            var typeInfo = _semanticModel.GetTypeInfo(typeSyntax);
+            if (typeInfo.Type != null && typeInfo.Type.TypeKind != TypeKind.Error)
+            {
+                var qualifiedName = typeInfo.Type.ToDisplayString();
+
+                // Skip only actual primitive types and void to reduce noise
+                // Don't skip important framework types like IEnumerable<T>, DateTime, etc.
+                if (IsPrimitiveType(typeInfo.Type.SpecialType))
+                    return;
+
+                // Try to resolve to a symbol ID, otherwise use qualified name
+                var targetSymbolId = _symbolLookup.TryGetValue(qualifiedName, out var symbolId)
+                    ? symbolId
+                    : qualifiedName;
+
+                var edge = new SymbolEdge
+                {
+                    SourceSymbolId = sourceSymbolId,
+                    TargetSymbolId = targetSymbolId,
+                    Kind = edgeKind,
+                    RepositoryName = _repositoryName,
+                    BranchName = _branchName,
+                    CommitSha = _commitSha
+                };
+                _edges.Add(edge);
+            }
+        }
+
+        /// <summary>
+        /// Determines if a SpecialType represents a primitive type that should be excluded from type edges.
+        /// Only excludes actual primitives (bool, numeric types, string, void) to reduce noise.
+        /// Does NOT exclude important framework types like IEnumerable, DateTime, Object, etc.
+        /// </summary>
+        private static bool IsPrimitiveType(SpecialType specialType)
+        {
+            return specialType switch
+            {
+                SpecialType.System_Void => true,
+                SpecialType.System_Boolean => true,
+                SpecialType.System_Char => true,
+                SpecialType.System_SByte => true,
+                SpecialType.System_Byte => true,
+                SpecialType.System_Int16 => true,
+                SpecialType.System_UInt16 => true,
+                SpecialType.System_Int32 => true,
+                SpecialType.System_UInt32 => true,
+                SpecialType.System_Int64 => true,
+                SpecialType.System_UInt64 => true,
+                SpecialType.System_Decimal => true,
+                SpecialType.System_Single => true,
+                SpecialType.System_Double => true,
+                SpecialType.System_String => true,
+                SpecialType.System_IntPtr => true,
+                SpecialType.System_UIntPtr => true,
+                _ => false
+            };
+        }
+
+        /// <summary>
+        /// Extracts type edges for all parameters in a parameter list.
+        /// </summary>
+        private void ExtractParameterTypeEdges(ParameterListSyntax parameterList, string sourceSymbolId)
+        {
+            foreach (var parameter in parameterList.Parameters)
+            {
+                if (parameter.Type != null)
+                {
+                    ExtractTypeEdge(parameter.Type, sourceSymbolId, EdgeKind.TypeOf);
                 }
             }
         }
