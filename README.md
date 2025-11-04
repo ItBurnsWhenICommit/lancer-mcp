@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.png" alt="LANCER Logo" width="350"/>
+  <img src="lancerLogo.png" alt="LANCER Logo" width="350"/>
 </p>
 
 # Project Indexer MCP
