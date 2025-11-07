@@ -67,7 +67,8 @@ run_migration() {
 
     print_info "Running migration: $filename"
 
-    if docker exec -i "$CONTAINER_NAME" psql -U "$DB_USER" -d "$DB_NAME" < "$file" > /dev/null 2>&1; then
+    # Redirect only stdout to /dev/null, preserve stderr for error messages
+    if docker exec -i "$CONTAINER_NAME" psql -U "$DB_USER" -d "$DB_NAME" < "$file" > /dev/null; then
         print_info "✓ $filename completed successfully"
         return 0
     else
