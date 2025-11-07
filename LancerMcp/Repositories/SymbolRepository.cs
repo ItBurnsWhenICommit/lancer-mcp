@@ -209,5 +209,13 @@ public sealed class SymbolRepository : ISymbolRepository
         _logger.LogInformation("Deleted {Count} symbols for branch {BranchName}", rowsAffected, branchName);
         return rowsAffected;
     }
+
+    public async Task<int> DeleteByFileAsync(string repoId, string branchName, string filePath, CancellationToken cancellationToken = default)
+    {
+        const string sql = "DELETE FROM symbols WHERE repo_id = @RepoId AND branch_name = @BranchName AND file_path = @FilePath";
+        var rowsAffected = await _db.ExecuteAsync(sql, new { RepoId = repoId, BranchName = branchName, FilePath = filePath }, cancellationToken);
+        _logger.LogDebug("Deleted {Count} symbols for file {FilePath}", rowsAffected, filePath);
+        return rowsAffected;
+    }
 }
 

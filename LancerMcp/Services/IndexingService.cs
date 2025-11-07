@@ -78,13 +78,15 @@ public sealed class IndexingService
             return result;
         }
 
-        // Step 1: Parse all files
+        // Step 1: Parse all files and handle deletions
         foreach (var fileChange in fileChangesList)
         {
-            // Skip deleted files
+            // Handle deleted files by removing their data from the database
             if (fileChange.ChangeType == ChangeType.Deleted)
             {
                 result.DeletedFiles.Add(fileChange.FilePath);
+                await DeleteFileDataAsync(fileChange.RepositoryName, fileChange.BranchName, fileChange.FilePath, cancellationToken);
+                _logger.LogInformation("Deleted indexed data for removed file: {FilePath}", fileChange.FilePath);
                 continue;
             }
 
@@ -223,6 +225,12 @@ public sealed class IndexingService
     /// <summary>
     /// Persists parsed files, symbols, edges, chunks, and embeddings to PostgreSQL.
     /// </summary>
+    /// <remarks>
+    /// TODO: This method is not transactional. If any step fails after DeleteFileDataAsync,
+    /// the old data is already deleted, leaving gaps until the next successful re-index.
+    /// Future improvement: Refactor repositories to accept connection/transaction parameters
+    /// and wrap the entire delete-insert workflow in a single database transaction.
+    /// </remarks>
     private async Task PersistToStorageAsync(List<ParsedFile> parsedFiles, CancellationToken cancellationToken)
     {
         _logger.LogInformation("Persisting {Count} files to storage...", parsedFiles.Count);
@@ -234,6 +242,18 @@ public sealed class IndexingService
             foreach (var repoName in repositoryNames)
             {
                 await EnsureRepositoryExistsAsync(repoName, cancellationToken);
+            }
+
+            // Step 0.5: Delete old symbols/edges/chunks for files being re-indexed
+            // NOTE: This is not transactional - if insert fails, old data is already gone
+            var filesToDelete = parsedFiles
+                .Select(f => new { f.RepositoryName, f.BranchName, f.FilePath })
+                .Distinct()
+                .ToList();
+
+            foreach (var file in filesToDelete)
+            {
+                await DeleteFileDataAsync(file.RepositoryName, file.BranchName, file.FilePath, cancellationToken);
             }
 
             // Step 1: Persist commits
@@ -363,6 +383,24 @@ public sealed class IndexingService
 
         await _repositoryRepository.CreateAsync(repository, cancellationToken);
         _logger.LogInformation("Created repository record for {Name}", repositoryName);
+    }
+
+    /// <summary>
+    /// Deletes all indexed data (symbols, edges, chunks, embeddings, file metadata) for a specific file.
+    /// This prevents duplicate data when re-indexing the same file and cleans up deleted files.
+    /// </summary>
+    private async Task DeleteFileDataAsync(string repositoryName, string branchName, string filePath, CancellationToken cancellationToken)
+    {
+        _logger.LogDebug("Deleting old data for file {FilePath} in {Repo}/{Branch}", filePath, repositoryName, branchName);
+
+        // Delete symbols for this file (cascading deletes will handle edges via foreign keys)
+        await _symbolRepository.DeleteByFileAsync(repositoryName, branchName, filePath, cancellationToken);
+
+        // Delete code chunks for this file (cascading deletes will handle embeddings via foreign keys)
+        await _chunkRepository.DeleteByFileAsync(repositoryName, branchName, filePath, cancellationToken);
+
+        // Delete file metadata
+        await _fileRepository.DeleteByFilePathAsync(repositoryName, branchName, filePath, cancellationToken);
     }
 }
 

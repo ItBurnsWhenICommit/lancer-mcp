@@ -3,16 +3,15 @@
 # PostgreSQL Migration Script for Lancer MCP
 # ============================================================================
 # This script runs all migration files in order to set up the database schema
+# Uses docker exec to run psql commands inside the container
 # ============================================================================
 
 set -e  # Exit on error
 
 # Configuration
-DB_HOST="${DB_HOST:-localhost}"
-DB_PORT="${DB_PORT:-5432}"
+CONTAINER_NAME="${CONTAINER_NAME:-lancer-postgres}"
 DB_NAME="${DB_NAME:-lancer}"
 DB_USER="${DB_USER:-postgres}"
-DB_PASSWORD="${DB_PASSWORD:-postgres}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -33,14 +32,15 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Function to check if PostgreSQL is running
+# Function to check if Docker container is running
 check_postgres() {
-    print_info "Checking PostgreSQL connection..."
-    if PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d postgres -c '\q' 2>/dev/null; then
-        print_info "PostgreSQL is running"
+    print_info "Checking if container '$CONTAINER_NAME' is running..."
+    if docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+        print_info "Container is running"
         return 0
     else
-        print_error "Cannot connect to PostgreSQL at $DB_HOST:$DB_PORT"
+        print_error "Container '$CONTAINER_NAME' is not running"
+        print_info "Start it with: cd database && docker compose up -d"
         return 1
     fi
 }
@@ -48,11 +48,14 @@ check_postgres() {
 # Function to create database if it doesn't exist
 create_database() {
     print_info "Checking if database '$DB_NAME' exists..."
-    if PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d postgres -lqt | cut -d \| -f 1 | grep -qw $DB_NAME; then
+
+    local result=$(docker exec -i "$CONTAINER_NAME" psql -U "$DB_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" 2>&1)
+
+    if [ "$result" = "1" ]; then
         print_info "Database '$DB_NAME' already exists"
     else
         print_info "Creating database '$DB_NAME'..."
-        PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d postgres -c "CREATE DATABASE $DB_NAME;"
+        docker exec -i "$CONTAINER_NAME" psql -U "$DB_USER" -d postgres -c "CREATE DATABASE $DB_NAME;" 2>&1
         print_info "Database '$DB_NAME' created successfully"
     fi
 }
@@ -64,7 +67,7 @@ run_migration() {
 
     print_info "Running migration: $filename"
 
-    if PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME -f $file; then
+    if docker exec -i "$CONTAINER_NAME" psql -U "$DB_USER" -d "$DB_NAME" < "$file" > /dev/null 2>&1; then
         print_info "✓ $filename completed successfully"
         return 0
     else
@@ -79,14 +82,14 @@ main() {
     echo "PostgreSQL Migration for Lancer MCP"
     echo "============================================================================"
     echo "Database: $DB_NAME"
-    echo "Host: $DB_HOST:$DB_PORT"
+    echo "Container: $CONTAINER_NAME"
     echo "User: $DB_USER"
     echo "============================================================================"
     echo ""
 
-    # Check PostgreSQL connection
+    # Check if container is running
     if ! check_postgres; then
-        print_error "Migration aborted: Cannot connect to PostgreSQL"
+        print_error "Migration aborted: Container not running"
         exit 1
     fi
 

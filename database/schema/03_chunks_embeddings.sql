@@ -46,6 +46,10 @@ CREATE INDEX idx_chunks_content_fts ON code_chunks USING GIN (
 -- Composite index for common queries
 CREATE INDEX idx_chunks_repo_branch_lang ON code_chunks(repo_id, branch_name, language);
 
+-- Unique constraint to prevent duplicate chunks
+-- Each chunk is uniquely identified by repo, branch, file, and chunk location
+CREATE UNIQUE INDEX idx_chunks_unique ON code_chunks(repo_id, branch_name, file_path, chunk_start_line, chunk_end_line);
+
 COMMENT ON TABLE code_chunks IS 'Stores code chunks for embedding and search';
 COMMENT ON COLUMN code_chunks.content IS 'Code content with context lines';
 COMMENT ON COLUMN code_chunks.start_line IS 'Symbol start line (excluding context)';
