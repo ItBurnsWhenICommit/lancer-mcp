@@ -243,7 +243,7 @@ public sealed class IndexingService
             await EnsureRepositoryExistsAsync(repoName, cancellationToken);
         }
 
-        // Step 1: Chunk symbols (CPU-heavy, do BEFORE transaction)
+        // Step 1: Chunk files (CPU-heavy, do BEFORE transaction)
         _logger.LogInformation("Chunking {Count} files...", parsedFiles.Count);
         var allChunks = new List<CodeChunk>();
         foreach (var parsedFile in parsedFiles)
