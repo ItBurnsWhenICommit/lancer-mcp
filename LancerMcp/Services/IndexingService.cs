@@ -517,7 +517,8 @@ public sealed class IndexingService
                                  signature, documentation, modifiers, parent_symbol_id, indexed_at)
             VALUES (@Id, @RepositoryName, @BranchName, @CommitSha, @FilePath, @Name, @QualifiedName,
                     @Kind::symbol_kind, @Language::language, @StartLine, @StartColumn, @EndLine, @EndColumn,
-                    @Signature, @Documentation, @Modifiers, @ParentSymbolId, @IndexedAt)";
+                    @Signature, @Documentation, @Modifiers, @ParentSymbolId, @IndexedAt)
+            ON CONFLICT (repo_id, branch_name, file_path, name, start_line, end_line) DO NOTHING";
 
         var symbolsList = symbols.Select(s => new
         {
@@ -587,7 +588,8 @@ public sealed class IndexingService
             VALUES (@Id, @RepositoryName, @BranchName, @CommitSha, @FilePath, @SymbolId,
                     @SymbolName, @SymbolKind::symbol_kind, @Language::language, @Content, @StartLine, @EndLine,
                     @ChunkStartLine, @ChunkEndLine, @TokenCount, @ParentSymbolName,
-                    @Signature, @Documentation, @CreatedAt)";
+                    @Signature, @Documentation, @CreatedAt)
+            ON CONFLICT (repo_id, branch_name, file_path, chunk_start_line, chunk_end_line) DO NOTHING";
 
         var chunksList = chunks.Select(c => new
         {
