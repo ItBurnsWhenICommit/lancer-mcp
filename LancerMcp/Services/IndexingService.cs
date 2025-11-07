@@ -230,7 +230,7 @@ public sealed class IndexingService
     /// <summary>
     /// Persists parsed files, symbols, edges, chunks, and embeddings to PostgreSQL.
     /// All operations are wrapped in a single database transaction to ensure atomicity.
-    /// If any step fails, the entire transaction is rolled back, preventing data loss.
+    /// If any step fails, the entire transaction is rolled back, preventing partial writes or data corruption.
     /// </summary>
     private async Task PersistToStorageAsync(List<ParsedFile> parsedFiles, CancellationToken cancellationToken)
     {
