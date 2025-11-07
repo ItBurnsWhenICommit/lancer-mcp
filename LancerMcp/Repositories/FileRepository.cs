@@ -167,5 +167,13 @@ public sealed class FileRepository : IFileRepository
         _logger.LogInformation("Deleted {Count} files for branch {BranchName}", rowsAffected, branchName);
         return rowsAffected;
     }
+
+    public async Task<int> DeleteByFilePathAsync(string repoId, string branchName, string filePath, CancellationToken cancellationToken = default)
+    {
+        const string sql = "DELETE FROM files WHERE repo_id = @RepoId AND branch_name = @BranchName AND file_path = @FilePath";
+        var rowsAffected = await _db.ExecuteAsync(sql, new { RepoId = repoId, BranchName = branchName, FilePath = filePath }, cancellationToken);
+        _logger.LogDebug("Deleted {Count} file metadata for {FilePath}", rowsAffected, filePath);
+        return rowsAffected;
+    }
 }
 

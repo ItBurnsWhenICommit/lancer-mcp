@@ -1,3 +1,5 @@
+using Dapper;
+using Pgvector;
 using Microsoft.Extensions.Options;
 using LancerMcp.Configuration;
 using LancerMcp.Models;
@@ -12,6 +14,7 @@ public sealed class IndexingService
 {
     private readonly ILogger<IndexingService> _logger;
     private readonly IOptionsMonitor<ServerOptions> _options;
+    private readonly DatabaseService _db;
     private readonly GitTrackerService _gitTracker;
     private readonly LanguageDetectionService _languageDetection;
     private readonly RoslynParserService _roslynParser;
@@ -30,6 +33,7 @@ public sealed class IndexingService
     public IndexingService(
         ILogger<IndexingService> logger,
         IOptionsMonitor<ServerOptions> options,
+        DatabaseService db,
         GitTrackerService gitTracker,
         LanguageDetectionService languageDetection,
         RoslynParserService roslynParser,
@@ -46,6 +50,7 @@ public sealed class IndexingService
     {
         _logger = logger;
         _options = options;
+        _db = db;
         _gitTracker = gitTracker;
         _languageDetection = languageDetection;
         _roslynParser = roslynParser;
@@ -78,13 +83,15 @@ public sealed class IndexingService
             return result;
         }
 
-        // Step 1: Parse all files
+        // Step 1: Parse all files and handle deletions
         foreach (var fileChange in fileChangesList)
         {
-            // Skip deleted files
+            // Handle deleted files by removing their data from the database
             if (fileChange.ChangeType == ChangeType.Deleted)
             {
                 result.DeletedFiles.Add(fileChange.FilePath);
+                await DeleteFileDataAsync(fileChange.RepositoryName, fileChange.BranchName, fileChange.FilePath, cancellationToken);
+                _logger.LogInformation("Deleted indexed data for removed file: {FilePath}", fileChange.FilePath);
                 continue;
             }
 
@@ -222,21 +229,57 @@ public sealed class IndexingService
 
     /// <summary>
     /// Persists parsed files, symbols, edges, chunks, and embeddings to PostgreSQL.
+    /// All operations are wrapped in a single database transaction to ensure atomicity.
+    /// If any step fails, the entire transaction is rolled back, preventing partial writes or data corruption.
     /// </summary>
     private async Task PersistToStorageAsync(List<ParsedFile> parsedFiles, CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Persisting {Count} files to storage...", parsedFiles.Count);
+        _logger.LogInformation("Persisting {Count} files to storage (transactional)...", parsedFiles.Count);
+
+        // Step 0: Ensure repositories exist in the database (outside transaction)
+        var repositoryNames = parsedFiles.Select(f => f.RepositoryName).Distinct().ToList();
+        foreach (var repoName in repositoryNames)
+        {
+            await EnsureRepositoryExistsAsync(repoName, cancellationToken);
+        }
+
+        // Step 1: Chunk files (CPU-heavy, do BEFORE transaction)
+        _logger.LogInformation("Chunking {Count} files...", parsedFiles.Count);
+        var allChunks = new List<CodeChunk>();
+        foreach (var parsedFile in parsedFiles)
+        {
+            var chunkedFile = await _chunkingService.ChunkFileAsync(parsedFile, cancellationToken);
+            allChunks.AddRange(chunkedFile.Chunks);
+        }
+        _logger.LogInformation("Generated {Count} chunks", allChunks.Count);
+
+        // Step 2: Generate embeddings (HTTP calls, do BEFORE transaction)
+        List<Embedding> embeddings = new();
+        if (allChunks.Any())
+        {
+            _logger.LogInformation("Generating embeddings for {Count} chunks...", allChunks.Count);
+            embeddings = await _embeddingService.GenerateEmbeddingsAsync(allChunks, cancellationToken);
+            _logger.LogInformation("Generated {Count} embeddings", embeddings.Count);
+        }
+
+        // Step 3: Open transaction and persist all data atomically
+        await using var connection = await _db.GetConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
         try
         {
-            // Step 0: Ensure repositories exist in the database
-            var repositoryNames = parsedFiles.Select(f => f.RepositoryName).Distinct().ToList();
-            foreach (var repoName in repositoryNames)
+            // Step 3a: Delete old data for files being re-indexed
+            var filesToDelete = parsedFiles
+                .Select(f => new { f.RepositoryName, f.BranchName, f.FilePath })
+                .Distinct()
+                .ToList();
+
+            foreach (var file in filesToDelete)
             {
-                await EnsureRepositoryExistsAsync(repoName, cancellationToken);
+                await DeleteFileDataTransactionalAsync(connection, transaction, file.RepositoryName, file.BranchName, file.FilePath, cancellationToken);
             }
 
-            // Step 1: Persist commits
+            // Step 3b: Persist commits
             var commits = parsedFiles
                 .GroupBy(f => new { f.RepositoryName, f.BranchName, f.CommitSha })
                 .Select(g => new Commit
@@ -255,11 +298,11 @@ public sealed class IndexingService
 
             if (commits.Any())
             {
-                await _commitRepository.CreateBatchAsync(commits, cancellationToken);
+                await CreateCommitsBatchTransactionalAsync(connection, transaction, commits, cancellationToken);
                 _logger.LogInformation("Persisted {Count} commits", commits.Count);
             }
 
-            // Step 2: Persist files (we don't have content size here, will be updated later if needed)
+            // Step 3c: Persist files
             var files = parsedFiles.Select(f => new FileMetadata
             {
                 Id = Guid.NewGuid().ToString(),
@@ -275,50 +318,49 @@ public sealed class IndexingService
 
             if (files.Any())
             {
-                await _fileRepository.CreateBatchAsync(files, cancellationToken);
+                await CreateFilesBatchTransactionalAsync(connection, transaction, files, cancellationToken);
                 _logger.LogInformation("Persisted {Count} files", files.Count);
             }
 
-            // Step 3: Persist symbols
+            // Step 3d: Persist symbols
             var allSymbols = parsedFiles.SelectMany(f => f.Symbols).ToList();
             if (allSymbols.Any())
             {
-                await _symbolRepository.CreateBatchAsync(allSymbols, cancellationToken);
+                await CreateSymbolsBatchTransactionalAsync(connection, transaction, allSymbols, cancellationToken);
                 _logger.LogInformation("Persisted {Count} symbols", allSymbols.Count);
             }
 
-            // Step 4: Persist edges
+            // Step 3e: Persist edges
             var allEdges = parsedFiles.SelectMany(f => f.Edges).ToList();
             if (allEdges.Any())
             {
-                await _edgeRepository.CreateBatchAsync(allEdges, cancellationToken);
+                await CreateEdgesBatchTransactionalAsync(connection, transaction, allEdges, cancellationToken);
                 _logger.LogInformation("Persisted {Count} edges", allEdges.Count);
             }
 
-            // Step 5: Chunk symbols and persist chunks
-            var allChunks = new List<CodeChunk>();
-            foreach (var parsedFile in parsedFiles)
-            {
-                var chunkedFile = await _chunkingService.ChunkFileAsync(parsedFile, cancellationToken);
-                allChunks.AddRange(chunkedFile.Chunks);
-            }
-
+            // Step 3f: Persist chunks
             if (allChunks.Any())
             {
-                await _chunkRepository.CreateBatchAsync(allChunks, cancellationToken);
+                await CreateChunksBatchTransactionalAsync(connection, transaction, allChunks, cancellationToken);
                 _logger.LogInformation("Persisted {Count} chunks", allChunks.Count);
+            }
 
-                // Step 6: Generate and persist embeddings
-                var embeddings = await _embeddingService.GenerateEmbeddingsAsync(allChunks, cancellationToken);
-                await _embeddingRepository.CreateBatchAsync(embeddings, cancellationToken);
+            // Step 3g: Persist embeddings
+            if (embeddings.Any())
+            {
+                await CreateEmbeddingsBatchTransactionalAsync(connection, transaction, embeddings, cancellationToken);
                 _logger.LogInformation("Persisted {Count} embeddings", embeddings.Count);
             }
 
-            _logger.LogInformation("Storage persistence complete");
+            // Commit the transaction
+            await transaction.CommitAsync(cancellationToken);
+            _logger.LogInformation("Storage persistence complete (transaction committed)");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to persist data to storage");
+            // Rollback the transaction on error
+            _logger.LogError(ex, "Failed to persist data to storage, rolling back transaction");
+            await transaction.RollbackAsync(cancellationToken);
             throw;
         }
     }
@@ -363,6 +405,251 @@ public sealed class IndexingService
 
         await _repositoryRepository.CreateAsync(repository, cancellationToken);
         _logger.LogInformation("Created repository record for {Name}", repositoryName);
+    }
+
+    /// <summary>
+    /// Deletes all indexed data (symbols, edges, chunks, embeddings, file metadata) for a specific file.
+    /// This prevents duplicate data when re-indexing the same file and cleans up deleted files.
+    /// </summary>
+    private async Task DeleteFileDataAsync(string repositoryName, string branchName, string filePath, CancellationToken cancellationToken)
+    {
+        _logger.LogDebug("Deleting old data for file {FilePath} in {Repo}/{Branch}", filePath, repositoryName, branchName);
+
+        // Delete symbols for this file (cascading deletes will handle edges via foreign keys)
+        await _symbolRepository.DeleteByFileAsync(repositoryName, branchName, filePath, cancellationToken);
+
+        // Delete code chunks for this file (cascading deletes will handle embeddings via foreign keys)
+        await _chunkRepository.DeleteByFileAsync(repositoryName, branchName, filePath, cancellationToken);
+
+        // Delete file metadata
+        await _fileRepository.DeleteByFilePathAsync(repositoryName, branchName, filePath, cancellationToken);
+    }
+
+    // ===== Transactional Helper Methods =====
+    // These methods execute database operations within a transaction to ensure atomicity.
+
+    private async Task DeleteFileDataTransactionalAsync(
+        Npgsql.NpgsqlConnection connection,
+        Npgsql.NpgsqlTransaction transaction,
+        string repositoryName,
+        string branchName,
+        string filePath,
+        CancellationToken cancellationToken)
+    {
+        var param = new { RepoId = repositoryName, BranchName = branchName, FilePath = filePath };
+
+        // Delete symbols (cascading deletes handle edges)
+        const string deleteSymbolsSql = "DELETE FROM symbols WHERE repo_id = @RepoId AND branch_name = @BranchName AND file_path = @FilePath";
+        var deleteSymbolsCmd = new CommandDefinition(deleteSymbolsSql, param, transaction, cancellationToken: cancellationToken);
+        await connection.ExecuteAsync(deleteSymbolsCmd);
+
+        // Delete chunks (cascading deletes handle embeddings)
+        const string deleteChunksSql = "DELETE FROM code_chunks WHERE repo_id = @RepoId AND branch_name = @BranchName AND file_path = @FilePath";
+        var deleteChunksCmd = new CommandDefinition(deleteChunksSql, param, transaction, cancellationToken: cancellationToken);
+        await connection.ExecuteAsync(deleteChunksCmd);
+
+        // Delete file metadata
+        const string deleteFileSql = "DELETE FROM files WHERE repo_id = @RepoId AND branch_name = @BranchName AND file_path = @FilePath";
+        var deleteFileCmd = new CommandDefinition(deleteFileSql, param, transaction, cancellationToken: cancellationToken);
+        await connection.ExecuteAsync(deleteFileCmd);
+    }
+
+    private async Task CreateCommitsBatchTransactionalAsync(
+        Npgsql.NpgsqlConnection connection,
+        Npgsql.NpgsqlTransaction transaction,
+        List<Commit> commits,
+        CancellationToken cancellationToken)
+    {
+        const string sql = @"
+            INSERT INTO commits (id, repo_id, sha, branch_name, author_name, author_email,
+                                 commit_message, committed_at, indexed_at)
+            VALUES (@Id, @RepoId, @Sha, @BranchName, @AuthorName, @AuthorEmail,
+                    @CommitMessage, @CommittedAt, @IndexedAt)
+            ON CONFLICT (repo_id, sha, branch_name) DO NOTHING";
+
+        var command = new CommandDefinition(sql, commits, transaction, cancellationToken: cancellationToken);
+        await connection.ExecuteAsync(command);
+    }
+
+    private async Task CreateFilesBatchTransactionalAsync(
+        Npgsql.NpgsqlConnection connection,
+        Npgsql.NpgsqlTransaction transaction,
+        List<FileMetadata> files,
+        CancellationToken cancellationToken)
+    {
+        const string sql = @"
+            INSERT INTO files (id, repo_id, branch_name, commit_sha, file_path, language,
+                               size_bytes, line_count, indexed_at)
+            VALUES (@Id, @RepoId, @BranchName, @CommitSha, @FilePath, @Language::language,
+                    @SizeBytes, @LineCount, @IndexedAt)
+            ON CONFLICT (repo_id, branch_name, commit_sha, file_path) DO UPDATE
+            SET language = EXCLUDED.language,
+                size_bytes = EXCLUDED.size_bytes,
+                line_count = EXCLUDED.line_count,
+                indexed_at = EXCLUDED.indexed_at";
+
+        var filesList = files.Select(f => new
+        {
+            f.Id,
+            f.RepoId,
+            f.BranchName,
+            f.CommitSha,
+            f.FilePath,
+            Language = f.Language.ToString(),
+            f.SizeBytes,
+            f.LineCount,
+            f.IndexedAt
+        }).ToList();
+
+        var command = new CommandDefinition(sql, filesList, transaction, cancellationToken: cancellationToken);
+        await connection.ExecuteAsync(command);
+    }
+
+    private async Task CreateSymbolsBatchTransactionalAsync(
+        Npgsql.NpgsqlConnection connection,
+        Npgsql.NpgsqlTransaction transaction,
+        List<Symbol> symbols,
+        CancellationToken cancellationToken)
+    {
+        const string sql = @"
+            INSERT INTO symbols (id, repo_id, branch_name, commit_sha, file_path, name, qualified_name,
+                                 kind, language, start_line, start_column, end_line, end_column,
+                                 signature, documentation, modifiers, parent_symbol_id, indexed_at)
+            VALUES (@Id, @RepositoryName, @BranchName, @CommitSha, @FilePath, @Name, @QualifiedName,
+                    @Kind::symbol_kind, @Language::language, @StartLine, @StartColumn, @EndLine, @EndColumn,
+                    @Signature, @Documentation, @Modifiers, @ParentSymbolId, @IndexedAt)
+            ON CONFLICT (repo_id, branch_name, file_path, name, start_line, end_line) DO NOTHING";
+
+        var symbolsList = symbols.Select(s => new
+        {
+            s.Id,
+            s.RepositoryName,
+            s.BranchName,
+            s.CommitSha,
+            s.FilePath,
+            s.Name,
+            s.QualifiedName,
+            Kind = s.Kind.ToString(),
+            Language = s.Language.ToString(),
+            s.StartLine,
+            s.StartColumn,
+            s.EndLine,
+            s.EndColumn,
+            s.Signature,
+            s.Documentation,
+            s.Modifiers,
+            s.ParentSymbolId,
+            s.IndexedAt
+        }).ToList();
+
+        var command = new CommandDefinition(sql, symbolsList, transaction, cancellationToken: cancellationToken);
+        await connection.ExecuteAsync(command);
+    }
+
+    private async Task CreateEdgesBatchTransactionalAsync(
+        Npgsql.NpgsqlConnection connection,
+        Npgsql.NpgsqlTransaction transaction,
+        List<SymbolEdge> edges,
+        CancellationToken cancellationToken)
+    {
+        const string sql = @"
+            INSERT INTO edges (id, source_symbol_id, target_symbol_id, kind, repo_id, branch_name,
+                               commit_sha, indexed_at)
+            VALUES (@Id, @SourceSymbolId, @TargetSymbolId, @Kind::edge_kind, @RepositoryName,
+                    @BranchName, @CommitSha, @IndexedAt)";
+
+        var edgesList = edges.Select(e => new
+        {
+            e.Id,
+            e.SourceSymbolId,
+            e.TargetSymbolId,
+            Kind = e.Kind.ToString(),
+            e.RepositoryName,
+            e.BranchName,
+            e.CommitSha,
+            e.IndexedAt
+        }).ToList();
+
+        var command = new CommandDefinition(sql, edgesList, transaction, cancellationToken: cancellationToken);
+        await connection.ExecuteAsync(command);
+    }
+
+    private async Task CreateChunksBatchTransactionalAsync(
+        Npgsql.NpgsqlConnection connection,
+        Npgsql.NpgsqlTransaction transaction,
+        List<CodeChunk> chunks,
+        CancellationToken cancellationToken)
+    {
+        const string sql = @"
+            INSERT INTO code_chunks (id, repo_id, branch_name, commit_sha, file_path, symbol_id,
+                                     symbol_name, symbol_kind, language, content, start_line, end_line,
+                                     chunk_start_line, chunk_end_line, token_count, parent_symbol_name,
+                                     signature, documentation, created_at)
+            VALUES (@Id, @RepositoryName, @BranchName, @CommitSha, @FilePath, @SymbolId,
+                    @SymbolName, @SymbolKind::symbol_kind, @Language::language, @Content, @StartLine, @EndLine,
+                    @ChunkStartLine, @ChunkEndLine, @TokenCount, @ParentSymbolName,
+                    @Signature, @Documentation, @CreatedAt)
+            ON CONFLICT (repo_id, branch_name, file_path, chunk_start_line, chunk_end_line) DO NOTHING";
+
+        var chunksList = chunks.Select(c => new
+        {
+            c.Id,
+            c.RepositoryName,
+            c.BranchName,
+            c.CommitSha,
+            c.FilePath,
+            c.SymbolId,
+            c.SymbolName,
+            SymbolKind = c.SymbolKind?.ToString(),
+            Language = c.Language.ToString(),
+            c.Content,
+            c.StartLine,
+            c.EndLine,
+            c.ChunkStartLine,
+            c.ChunkEndLine,
+            c.TokenCount,
+            c.ParentSymbolName,
+            c.Signature,
+            c.Documentation,
+            c.CreatedAt
+        }).ToList();
+
+        var command = new CommandDefinition(sql, chunksList, transaction, cancellationToken: cancellationToken);
+        await connection.ExecuteAsync(command);
+    }
+
+    private async Task CreateEmbeddingsBatchTransactionalAsync(
+        Npgsql.NpgsqlConnection connection,
+        Npgsql.NpgsqlTransaction transaction,
+        List<Embedding> embeddings,
+        CancellationToken cancellationToken)
+    {
+        const string sql = @"
+            INSERT INTO embeddings (id, chunk_id, repo_id, branch_name, commit_sha, vector,
+                                    model, model_version, generated_at)
+            VALUES (@Id, @ChunkId, @RepositoryName, @BranchName, @CommitSha, @Vector::vector,
+                    @Model, @ModelVersion, @GeneratedAt)
+            ON CONFLICT (chunk_id) DO UPDATE
+            SET vector = EXCLUDED.vector,
+                model = EXCLUDED.model,
+                model_version = EXCLUDED.model_version,
+                generated_at = EXCLUDED.generated_at";
+
+        var embeddingsList = embeddings.Select(e => new
+        {
+            e.Id,
+            e.ChunkId,
+            e.RepositoryName,
+            e.BranchName,
+            e.CommitSha,
+            Vector = new Vector(e.Vector).ToString(),
+            e.Model,
+            e.ModelVersion,
+            e.GeneratedAt
+        }).ToList();
+
+        var command = new CommandDefinition(sql, embeddingsList, transaction, cancellationToken: cancellationToken);
+        await connection.ExecuteAsync(command);
     }
 }
 

@@ -63,6 +63,11 @@ public interface ICodeChunkRepository
     Task<int> DeleteByBranchAsync(string repoId, string branchName, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Deletes all code chunks for a specific file.
+    /// </summary>
+    Task<int> DeleteByFileAsync(string repoId, string branchName, string filePath, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Gets the count of code chunks for a repository.
     /// </summary>
     Task<int> GetCountAsync(string repoId, CancellationToken cancellationToken = default);

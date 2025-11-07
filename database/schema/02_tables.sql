@@ -142,6 +142,10 @@ CREATE INDEX idx_symbols_name_trgm ON symbols USING GIN (name gin_trgm_ops);
 -- Composite index for common queries
 CREATE INDEX idx_symbols_repo_branch_kind ON symbols(repo_id, branch_name, kind);
 
+-- Unique constraint to prevent duplicate symbols
+-- Each symbol is uniquely identified by repo, branch, file, name, and location
+CREATE UNIQUE INDEX idx_symbols_unique ON symbols(repo_id, branch_name, file_path, name, start_line, end_line);
+
 COMMENT ON TABLE symbols IS 'Stores extracted code symbols (classes, functions, etc.)';
 COMMENT ON COLUMN symbols.qualified_name IS 'Fully qualified name (e.g., Namespace.Class.Method)';
 COMMENT ON COLUMN symbols.parent_symbol_id IS 'Parent symbol (e.g., class for a method)';
@@ -175,8 +179,8 @@ CREATE INDEX idx_edges_target_kind ON edges(target_symbol_id, kind);
 
 -- GIN index for multi-column queries
 CREATE INDEX idx_edges_composite ON edges USING GIN (
-    source_symbol_id, 
-    target_symbol_id, 
+    source_symbol_id,
+    target_symbol_id,
     kind
 ) WITH (fastupdate = off);
 

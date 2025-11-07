@@ -237,6 +237,14 @@ public sealed class CodeChunkRepository : ICodeChunkRepository
         return rowsAffected;
     }
 
+    public async Task<int> DeleteByFileAsync(string repoId, string branchName, string filePath, CancellationToken cancellationToken = default)
+    {
+        const string sql = "DELETE FROM code_chunks WHERE repo_id = @RepoId AND branch_name = @BranchName AND file_path = @FilePath";
+        var rowsAffected = await _db.ExecuteAsync(sql, new { RepoId = repoId, BranchName = branchName, FilePath = filePath }, cancellationToken);
+        _logger.LogDebug("Deleted {Count} code chunks for file {FilePath}", rowsAffected, filePath);
+        return rowsAffected;
+    }
+
     public async Task<int> GetCountAsync(string repoId, CancellationToken cancellationToken = default)
     {
         const string sql = "SELECT COUNT(*) FROM code_chunks WHERE repo_id = @RepoId";

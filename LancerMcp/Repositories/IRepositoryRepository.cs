@@ -194,6 +194,11 @@ public interface IFileRepository
     /// Deletes all files for a branch.
     /// </summary>
     Task<int> DeleteByBranchAsync(string repoId, string branchName, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Deletes file metadata for a specific file path.
+    /// </summary>
+    Task<int> DeleteByFilePathAsync(string repoId, string branchName, string filePath, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -250,6 +255,11 @@ public interface ISymbolRepository
     /// Deletes all symbols for a branch.
     /// </summary>
     Task<int> DeleteByBranchAsync(string repoId, string branchName, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Deletes all symbols for a specific file.
+    /// </summary>
+    Task<int> DeleteByFileAsync(string repoId, string branchName, string filePath, CancellationToken cancellationToken = default);
 }
 
 /// <summary>

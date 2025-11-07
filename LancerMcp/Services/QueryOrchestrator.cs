@@ -254,6 +254,7 @@ public sealed class QueryOrchestrator
         CancellationToken cancellationToken)
     {
         var results = new List<SearchResult>();
+        var seenSymbolIds = new HashSet<string>(); // Track seen symbols to avoid duplicates
 
         // Search for symbols by name
         if (parsedQuery.SymbolNames?.Any() == true)
@@ -269,6 +270,10 @@ public sealed class QueryOrchestrator
 
                 foreach (var symbol in symbols)
                 {
+                    // Skip if we've already processed this symbol
+                    if (!seenSymbolIds.Add(symbol.Id))
+                        continue;
+
                     results.Add(new SearchResult
                     {
                         Id = symbol.Id,
@@ -303,6 +308,10 @@ public sealed class QueryOrchestrator
 
             foreach (var symbol in symbols)
             {
+                // Skip if we've already processed this symbol
+                if (!seenSymbolIds.Add(symbol.Id))
+                    continue;
+
                 results.Add(new SearchResult
                 {
                     Id = symbol.Id,
@@ -334,6 +343,7 @@ public sealed class QueryOrchestrator
         CancellationToken cancellationToken)
     {
         var results = new List<SearchResult>();
+        var seenSymbolIds = new HashSet<string>(); // Track seen symbols to avoid duplicates
 
         // First, find the symbols mentioned in the query
         if (parsedQuery.SymbolNames?.Any() == true)
@@ -349,6 +359,10 @@ public sealed class QueryOrchestrator
 
                 foreach (var symbol in symbols)
                 {
+                    // Skip if we've already processed this symbol
+                    if (!seenSymbolIds.Add(symbol.Id))
+                        continue;
+
                     // Get related symbols through edges
                     var relatedSymbols = new List<RelatedSymbol>();
 
