@@ -763,6 +763,41 @@ public sealed class GitTrackerService : IDisposable
     }
 
     /// <summary>
+    /// Gets commit metadata (author, message, date) from a specific commit.
+    /// </summary>
+    /// <param name="repositoryName">Repository name.</param>
+    /// <param name="commitSha">Commit SHA.</param>
+    /// <returns>Commit metadata, or null if commit not found.</returns>
+    public async Task<CommitMetadata?> GetCommitMetadataAsync(string repositoryName, string commitSha, CancellationToken cancellationToken = default)
+    {
+        if (!_repositories.TryGetValue(repositoryName, out var repoState))
+        {
+            throw new InvalidOperationException($"Repository {repositoryName} is not initialized");
+        }
+
+        return await Task.Run(() =>
+        {
+            using var repo = new GitRepository(repoState.LocalPath);
+
+            var commit = repo.Lookup<GitCommit>(commitSha);
+            if (commit == null)
+            {
+                _logger.LogWarning("Commit {Sha} not found in repository {Repo}", commitSha, repositoryName);
+                return null;
+            }
+
+            return new CommitMetadata
+            {
+                Sha = commit.Sha,
+                AuthorName = commit.Author.Name,
+                AuthorEmail = commit.Author.Email,
+                CommitMessage = commit.Message,
+                CommittedAt = commit.Author.When
+            };
+        }, cancellationToken);
+    }
+
+    /// <summary>
     /// Gets the content of a file from a specific commit in a repository.
     /// Reads directly from Git object database (pack files), not from working directory.
     /// </summary>

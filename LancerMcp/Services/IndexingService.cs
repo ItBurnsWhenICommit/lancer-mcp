@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using LancerMcp.Configuration;
 using LancerMcp.Models;
 using LancerMcp.Repositories;
+using System.Collections.Concurrent;
 
 namespace LancerMcp.Services;
 
@@ -30,6 +31,10 @@ public sealed class IndexingService
     private readonly ICodeChunkRepository _chunkRepository;
     private readonly IEmbeddingRepository _embeddingRepository;
     private readonly SemaphoreSlim _concurrencyLimiter;
+
+    // Static lock dictionary to prevent concurrent workspace checkouts across IndexingService instances
+    // Key: "repositoryName:branchName"
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> _checkoutLocks = new();
 
     public IndexingService(
         ILogger<IndexingService> logger,
@@ -104,17 +109,30 @@ public sealed class IndexingService
 
             if (!string.IsNullOrEmpty(repositoryPath))
             {
-                // Ensure the branch is checked out BEFORE loading workspace
-                // This is synchronized through GitTrackerService to prevent concurrent checkout operations
-                await _gitTracker.EnsureBranchCheckedOutAsync(group.Key.RepositoryName, group.Key.BranchName, cancellationToken);
+                // Get or create a lock for this repository/branch combination
+                var lockKey = $"{group.Key.RepositoryName}:{group.Key.BranchName}";
+                var checkoutLock = _checkoutLocks.GetOrAdd(lockKey, _ => new SemaphoreSlim(1, 1));
 
-                // Load workspace for this specific repository AND branch
-                // This returns a handle with reference counting for safe disposal
-                var handle = await _workspaceLoader.GetOrLoadWorkspaceAsync(repositoryPath, group.Key.BranchName, cancellationToken);
-                if (handle != null)
+                // Acquire lock to prevent concurrent checkout operations across IndexingService instances
+                await checkoutLock.WaitAsync(cancellationToken);
+                try
                 {
-                    workspaceHandles.Add(handle);
-                    workspaceCache = handle.Cache;
+                    // Ensure the branch is checked out BEFORE loading workspace
+                    // This is synchronized at both IndexingService and GitTrackerService levels
+                    await _gitTracker.EnsureBranchCheckedOutAsync(group.Key.RepositoryName, group.Key.BranchName, cancellationToken);
+
+                    // Load workspace for this specific repository AND branch
+                    // This returns a handle with reference counting for safe disposal
+                    var handle = await _workspaceLoader.GetOrLoadWorkspaceAsync(repositoryPath, group.Key.BranchName, cancellationToken);
+                    if (handle != null)
+                    {
+                        workspaceHandles.Add(handle);
+                        workspaceCache = handle.Cache;
+                    }
+                }
+                finally
+                {
+                    checkoutLock.Release();
                 }
             }
 
@@ -124,9 +142,17 @@ public sealed class IndexingService
                 // Handle deleted files by removing their data from the database
                 if (fileChange.ChangeType == ChangeType.Deleted)
                 {
-                    result.DeletedFiles.Add(fileChange.FilePath);
-                    await DeleteFileDataAsync(fileChange.RepositoryName, fileChange.BranchName, fileChange.FilePath, cancellationToken);
-                    _logger.LogInformation("Deleted indexed data for removed file: {FilePath}", fileChange.FilePath);
+                    try
+                    {
+                        await DeleteFileDataAsync(fileChange.RepositoryName, fileChange.BranchName, fileChange.FilePath, cancellationToken);
+                        result.DeletedFiles.Add(fileChange.FilePath);
+                        _logger.LogInformation("Deleted indexed data for removed file: {FilePath}", fileChange.FilePath);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to delete indexed data for file: {FilePath}", fileChange.FilePath);
+                        result.FailedFiles++;
+                    }
                     continue;
                 }
 
@@ -136,47 +162,53 @@ public sealed class IndexingService
 
         var parsedFiles = await Task.WhenAll(allTasks);
 
-        // Release workspace handles now that parsing is complete
-        // This decrements reference counts and allows disposal if workspaces were marked for disposal
-        foreach (var handle in workspaceHandles)
+        try
         {
-            handle.Dispose();
+            foreach (var parsedFile in parsedFiles)
+            {
+                if (parsedFile == null)
+                {
+                    result.SkippedFiles++;
+                    continue;
+                }
+
+                if (parsedFile.Success)
+                {
+                    result.ParsedFiles.Add(parsedFile);
+                    result.TotalSymbols += parsedFile.Symbols.Count;
+                    result.TotalEdges += parsedFile.Edges.Count;
+                }
+                else
+                {
+                    result.FailedFiles++;
+                    _logger.LogWarning("Failed to parse {FilePath}: {Error}", parsedFile.FilePath, parsedFile.ErrorMessage);
+                }
+            }
+
+            _logger.LogInformation(
+                "Parsing complete: {ParsedCount} parsed, {SkippedCount} skipped, {FailedCount} failed, {DeletedCount} deleted, {SymbolCount} symbols, {EdgeCount} edges",
+                result.ParsedFiles.Count,
+                result.SkippedFiles,
+                result.FailedFiles,
+                result.DeletedFiles.Count,
+                result.TotalSymbols,
+                result.TotalEdges);
+
+            // Step 2: Persist to PostgreSQL
+            if (result.ParsedFiles.Any())
+            {
+                await PersistToStorageAsync(result.ParsedFiles, cancellationToken);
+            }
         }
-
-        foreach (var parsedFile in parsedFiles)
+        finally
         {
-            if (parsedFile == null)
+            // Release workspace handles after persistence is complete
+            // This ensures workspace resources are available for retry if persistence fails
+            // This decrements reference counts and allows disposal if workspaces were marked for disposal
+            foreach (var handle in workspaceHandles)
             {
-                result.SkippedFiles++;
-                continue;
+                handle.Dispose();
             }
-
-            if (parsedFile.Success)
-            {
-                result.ParsedFiles.Add(parsedFile);
-                result.TotalSymbols += parsedFile.Symbols.Count;
-                result.TotalEdges += parsedFile.Edges.Count;
-            }
-            else
-            {
-                result.FailedFiles++;
-                _logger.LogWarning("Failed to parse {FilePath}: {Error}", parsedFile.FilePath, parsedFile.ErrorMessage);
-            }
-        }
-
-        _logger.LogInformation(
-            "Parsing complete: {ParsedCount} parsed, {SkippedCount} skipped, {FailedCount} failed, {DeletedCount} deleted, {SymbolCount} symbols, {EdgeCount} edges",
-            result.ParsedFiles.Count,
-            result.SkippedFiles,
-            result.FailedFiles,
-            result.DeletedFiles.Count,
-            result.TotalSymbols,
-            result.TotalEdges);
-
-        // Step 2: Persist to PostgreSQL
-        if (result.ParsedFiles.Any())
-        {
-            await PersistToStorageAsync(result.ParsedFiles, cancellationToken);
         }
 
         // Step 3: Automatically mark all branches as indexed after successful indexing
@@ -332,25 +364,36 @@ public sealed class IndexingService
 
             foreach (var file in filesToDelete)
             {
-                await DeleteFileDataTransactionalAsync(connection, transaction, file.RepositoryName, file.BranchName, file.FilePath, cancellationToken);
+                await DeleteFileDataAsync(file.RepositoryName, file.BranchName, file.FilePath, cancellationToken, connection, transaction);
             }
 
             // Step 3b: Persist commits
-            var commits = parsedFiles
+            // Fetch commit metadata from Git for each unique commit
+            var commitGroups = parsedFiles
                 .GroupBy(f => new { f.RepositoryName, f.BranchName, f.CommitSha })
-                .Select(g => new Commit
+                .ToList();
+
+            var commits = new List<Commit>();
+            foreach (var g in commitGroups)
+            {
+                var commitMetadata = await _gitTracker.GetCommitMetadataAsync(
+                    g.Key.RepositoryName,
+                    g.Key.CommitSha,
+                    cancellationToken);
+
+                commits.Add(new Commit
                 {
                     Id = Guid.NewGuid().ToString(),
-                    RepoId = g.First().RepositoryName,
+                    RepoId = g.Key.RepositoryName,
                     Sha = g.Key.CommitSha,
                     BranchName = g.Key.BranchName,
-                    AuthorName = "Unknown", // TODO: Get from Git
-                    AuthorEmail = "unknown@example.com",
-                    CommitMessage = "Indexed commit",
-                    CommittedAt = DateTimeOffset.UtcNow,
+                    AuthorName = commitMetadata?.AuthorName ?? "Unknown",
+                    AuthorEmail = commitMetadata?.AuthorEmail ?? "unknown@example.com",
+                    CommitMessage = commitMetadata?.CommitMessage ?? "Indexed commit",
+                    CommittedAt = commitMetadata?.CommittedAt ?? DateTimeOffset.UtcNow,
                     IndexedAt = DateTimeOffset.UtcNow
-                })
-                .ToList();
+                });
+            }
 
             if (commits.Any())
             {
@@ -367,8 +410,8 @@ public sealed class IndexingService
                 CommitSha = f.CommitSha,
                 FilePath = f.FilePath,
                 Language = f.Language,
-                SizeBytes = 0, // TODO: Get actual file size from Git
-                LineCount = 0, // TODO: Get actual line count from Git
+                SizeBytes = f.SourceText != null ? System.Text.Encoding.UTF8.GetByteCount(f.SourceText) : 0,
+                LineCount = f.SourceText != null ? f.SourceText.Count(c => c == '\n') + 1 : 0,
                 IndexedAt = DateTimeOffset.UtcNow
             }).ToList();
 
@@ -471,48 +514,54 @@ public sealed class IndexingService
     /// Deletes all indexed data (symbols, edges, chunks, embeddings, file metadata) for a specific file.
     /// This prevents duplicate data when re-indexing the same file and cleans up deleted files.
     /// </summary>
-    private async Task DeleteFileDataAsync(string repositoryName, string branchName, string filePath, CancellationToken cancellationToken)
+    /// <param name="connection">Optional database connection for transactional operations.</param>
+    /// <param name="transaction">Optional database transaction for transactional operations.</param>
+    private async Task DeleteFileDataAsync(
+        string repositoryName,
+        string branchName,
+        string filePath,
+        CancellationToken cancellationToken,
+        Npgsql.NpgsqlConnection? connection = null,
+        Npgsql.NpgsqlTransaction? transaction = null)
     {
         _logger.LogDebug("Deleting old data for file {FilePath} in {Repo}/{Branch}", filePath, repositoryName, branchName);
 
-        // Delete symbols for this file (cascading deletes will handle edges via foreign keys)
-        await _symbolRepository.DeleteByFileAsync(repositoryName, branchName, filePath, cancellationToken);
+        // If connection and transaction are provided, use raw SQL for transactional operations
+        if (connection != null && transaction != null)
+        {
+            var param = new { RepoId = repositoryName, BranchName = branchName, FilePath = filePath };
 
-        // Delete code chunks for this file (cascading deletes will handle embeddings via foreign keys)
-        await _chunkRepository.DeleteByFileAsync(repositoryName, branchName, filePath, cancellationToken);
+            // Delete symbols (cascading deletes handle edges)
+            const string deleteSymbolsSql = "DELETE FROM symbols WHERE repo_id = @RepoId AND branch_name = @BranchName AND file_path = @FilePath";
+            var deleteSymbolsCmd = new CommandDefinition(deleteSymbolsSql, param, transaction, cancellationToken: cancellationToken);
+            await connection.ExecuteAsync(deleteSymbolsCmd);
 
-        // Delete file metadata
-        await _fileRepository.DeleteByFilePathAsync(repositoryName, branchName, filePath, cancellationToken);
+            // Delete chunks (cascading deletes handle embeddings)
+            const string deleteChunksSql = "DELETE FROM code_chunks WHERE repo_id = @RepoId AND branch_name = @BranchName AND file_path = @FilePath";
+            var deleteChunksCmd = new CommandDefinition(deleteChunksSql, param, transaction, cancellationToken: cancellationToken);
+            await connection.ExecuteAsync(deleteChunksCmd);
+
+            // Delete file metadata
+            const string deleteFileSql = "DELETE FROM files WHERE repo_id = @RepoId AND branch_name = @BranchName AND file_path = @FilePath";
+            var deleteFileCmd = new CommandDefinition(deleteFileSql, param, transaction, cancellationToken: cancellationToken);
+            await connection.ExecuteAsync(deleteFileCmd);
+        }
+        else
+        {
+            // Use repository methods for non-transactional operations
+            // Delete symbols for this file (cascading deletes will handle edges via foreign keys)
+            await _symbolRepository.DeleteByFileAsync(repositoryName, branchName, filePath, cancellationToken);
+
+            // Delete code chunks for this file (cascading deletes will handle embeddings via foreign keys)
+            await _chunkRepository.DeleteByFileAsync(repositoryName, branchName, filePath, cancellationToken);
+
+            // Delete file metadata
+            await _fileRepository.DeleteByFilePathAsync(repositoryName, branchName, filePath, cancellationToken);
+        }
     }
 
     // ===== Transactional Helper Methods =====
     // These methods execute database operations within a transaction to ensure atomicity.
-
-    private async Task DeleteFileDataTransactionalAsync(
-        Npgsql.NpgsqlConnection connection,
-        Npgsql.NpgsqlTransaction transaction,
-        string repositoryName,
-        string branchName,
-        string filePath,
-        CancellationToken cancellationToken)
-    {
-        var param = new { RepoId = repositoryName, BranchName = branchName, FilePath = filePath };
-
-        // Delete symbols (cascading deletes handle edges)
-        const string deleteSymbolsSql = "DELETE FROM symbols WHERE repo_id = @RepoId AND branch_name = @BranchName AND file_path = @FilePath";
-        var deleteSymbolsCmd = new CommandDefinition(deleteSymbolsSql, param, transaction, cancellationToken: cancellationToken);
-        await connection.ExecuteAsync(deleteSymbolsCmd);
-
-        // Delete chunks (cascading deletes handle embeddings)
-        const string deleteChunksSql = "DELETE FROM code_chunks WHERE repo_id = @RepoId AND branch_name = @BranchName AND file_path = @FilePath";
-        var deleteChunksCmd = new CommandDefinition(deleteChunksSql, param, transaction, cancellationToken: cancellationToken);
-        await connection.ExecuteAsync(deleteChunksCmd);
-
-        // Delete file metadata
-        const string deleteFileSql = "DELETE FROM files WHERE repo_id = @RepoId AND branch_name = @BranchName AND file_path = @FilePath";
-        var deleteFileCmd = new CommandDefinition(deleteFileSql, param, transaction, cancellationToken: cancellationToken);
-        await connection.ExecuteAsync(deleteFileCmd);
-    }
 
     private async Task CreateCommitsBatchTransactionalAsync(
         Npgsql.NpgsqlConnection connection,
@@ -772,23 +821,32 @@ public sealed class IndexingService
             .GroupBy(s => NormalizeQualifiedName(s.QualifiedName!))
             .ToDictionary(g => g.Key, g => g.First().Id);
 
-        // Also query existing symbols from the database for cross-file resolution
+        // Collect all target qualified names that need to be resolved from the database
+        // Only query for symbols we actually need, not all symbols in the repository
+        var targetQualifiedNames = edges
+            .Where(e => !string.IsNullOrEmpty(e.TargetSymbolId) && !currentBatchLookup.ContainsKey(e.TargetSymbolId!))
+            .Select(e => e.TargetSymbolId!)
+            .Distinct()
+            .ToList();
+
         var repositoryName = edges.FirstOrDefault()?.RepositoryName;
         var branchName = edges.FirstOrDefault()?.BranchName;
 
         Dictionary<string, string> databaseLookup = new();
-        if (!string.IsNullOrEmpty(repositoryName) && !string.IsNullOrEmpty(branchName))
+        if (!string.IsNullOrEmpty(repositoryName) && !string.IsNullOrEmpty(branchName) && targetQualifiedNames.Any())
         {
+            // Optimize: Only query for the specific qualified names we need
+            // This changes from O(n²) to O(n) by using indexed lookup
             var sql = @"
                 SELECT id, qualified_name
                 FROM symbols
                 WHERE repo_id = @RepoId
                   AND branch_name = @BranchName
-                  AND qualified_name IS NOT NULL";
+                  AND qualified_name = ANY(@QualifiedNames)";
 
             var command = new Dapper.CommandDefinition(
                 sql,
-                new { RepoId = repositoryName, BranchName = branchName },
+                new { RepoId = repositoryName, BranchName = branchName, QualifiedNames = targetQualifiedNames.ToArray() },
                 transaction,
                 cancellationToken: cancellationToken);
 
