@@ -78,7 +78,6 @@ public sealed class IndexingService
     public async Task<IndexingResult> IndexFilesAsync(IEnumerable<FileChange> fileChanges, CancellationToken cancellationToken = default)
     {
         var result = new IndexingResult();
-        var tasks = new List<Task<ParsedFile?>>();
         var fileChangesList = fileChanges.ToList();
 
         if (!fileChangesList.Any())
@@ -86,32 +85,63 @@ public sealed class IndexingService
             return result;
         }
 
-        // Step 0: Load workspace for the repository (if available)
-        var firstChange = fileChangesList.First();
-        var repositoryPath = _gitTracker.GetRepositoryPath(firstChange.RepositoryName);
-        WorkspaceCache? workspaceCache = null;
+        // Step 0: Group file changes by repository/branch to ensure we use the correct workspace for each group
+        // This is critical - if a batch contains changes from multiple repositories/branches, we need to load the right workspace for each
+        var groupedChanges = fileChangesList
+            .GroupBy(fc => new { fc.RepositoryName, fc.BranchName })
+            .ToList();
 
-        if (!string.IsNullOrEmpty(repositoryPath))
-        {
-            workspaceCache = await _workspaceLoader.GetOrLoadWorkspaceAsync(repositoryPath, cancellationToken);
-        }
+        _logger.LogDebug("Processing {GroupCount} repository/branch group(s)", groupedChanges.Count);
 
-        // Step 1: Parse all files and handle deletions
-        foreach (var fileChange in fileChangesList)
+        // Step 1: Process each repository/branch group with its own workspace
+        var allTasks = new List<Task<ParsedFile?>>();
+        var workspaceHandles = new List<WorkspaceHandle>();
+
+        foreach (var group in groupedChanges)
         {
-            // Handle deleted files by removing their data from the database
-            if (fileChange.ChangeType == ChangeType.Deleted)
+            var repositoryPath = _gitTracker.GetRepositoryPath(group.Key.RepositoryName);
+            WorkspaceCache? workspaceCache = null;
+
+            if (!string.IsNullOrEmpty(repositoryPath))
             {
-                result.DeletedFiles.Add(fileChange.FilePath);
-                await DeleteFileDataAsync(fileChange.RepositoryName, fileChange.BranchName, fileChange.FilePath, cancellationToken);
-                _logger.LogInformation("Deleted indexed data for removed file: {FilePath}", fileChange.FilePath);
-                continue;
+                // Ensure the branch is checked out BEFORE loading workspace
+                // This is synchronized through GitTrackerService to prevent concurrent checkout operations
+                await _gitTracker.EnsureBranchCheckedOutAsync(group.Key.RepositoryName, group.Key.BranchName, cancellationToken);
+
+                // Load workspace for this specific repository AND branch
+                // This returns a handle with reference counting for safe disposal
+                var handle = await _workspaceLoader.GetOrLoadWorkspaceAsync(repositoryPath, group.Key.BranchName, cancellationToken);
+                if (handle != null)
+                {
+                    workspaceHandles.Add(handle);
+                    workspaceCache = handle.Cache;
+                }
             }
 
-            tasks.Add(IndexFileAsync(fileChange, workspaceCache, cancellationToken));
+            // Parse all files in this group with the correct workspace
+            foreach (var fileChange in group)
+            {
+                // Handle deleted files by removing their data from the database
+                if (fileChange.ChangeType == ChangeType.Deleted)
+                {
+                    result.DeletedFiles.Add(fileChange.FilePath);
+                    await DeleteFileDataAsync(fileChange.RepositoryName, fileChange.BranchName, fileChange.FilePath, cancellationToken);
+                    _logger.LogInformation("Deleted indexed data for removed file: {FilePath}", fileChange.FilePath);
+                    continue;
+                }
+
+                allTasks.Add(IndexFileAsync(fileChange, workspaceCache, cancellationToken));
+            }
         }
 
-        var parsedFiles = await Task.WhenAll(tasks);
+        var parsedFiles = await Task.WhenAll(allTasks);
+
+        // Release workspace handles now that parsing is complete
+        // This decrements reference counts and allows disposal if workspaces were marked for disposal
+        foreach (var handle in workspaceHandles)
+        {
+            handle.Dispose();
+        }
 
         foreach (var parsedFile in parsedFiles)
         {
@@ -149,8 +179,11 @@ public sealed class IndexingService
             await PersistToStorageAsync(result.ParsedFiles, cancellationToken);
         }
 
-        // Step 3: Automatically mark the branch as indexed after successful indexing
-        _gitTracker.MarkBranchAsIndexed(firstChange.RepositoryName, firstChange.BranchName);
+        // Step 3: Automatically mark all branches as indexed after successful indexing
+        foreach (var group in groupedChanges)
+        {
+            _gitTracker.MarkBranchAsIndexed(group.Key.RepositoryName, group.Key.BranchName);
+        }
 
         return result;
     }

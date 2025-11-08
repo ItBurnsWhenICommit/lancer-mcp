@@ -48,6 +48,50 @@ public sealed class GitTrackerService : IDisposable
     }
 
     /// <summary>
+    /// Ensures the working tree is checked out to the specified branch.
+    /// This is the centralized, synchronized method for branch checkout.
+    /// MUST be called before loading workspace to ensure correct branch state.
+    /// </summary>
+    public async Task EnsureBranchCheckedOutAsync(string repositoryName, string branchName, CancellationToken cancellationToken = default)
+    {
+        await _updateLock.WaitAsync(cancellationToken);
+        try
+        {
+            var repoState = _repositories.GetValueOrDefault(repositoryName);
+            if (repoState == null)
+            {
+                _logger.LogWarning("Repository {RepositoryName} not found for branch checkout", repositoryName);
+                return;
+            }
+
+            using var repo = new GitRepository(repoState.LocalPath);
+            var currentBranch = repo.Head.FriendlyName;
+
+            if (currentBranch != branchName)
+            {
+                _logger.LogDebug("Checking out branch {BranchName} in repository {RepositoryName} (current: {CurrentBranch})",
+                    branchName, repositoryName, currentBranch);
+
+                var branch = repo.Branches[branchName] ?? repo.Branches[$"origin/{branchName}"];
+                if (branch != null)
+                {
+                    var checkoutOptions = new CheckoutOptions { CheckoutModifiers = CheckoutModifiers.Force };
+                    await Task.Run(() => Commands.Checkout(repo, branch, checkoutOptions), cancellationToken);
+                    _logger.LogDebug("Checked out branch {BranchName} in repository {RepositoryName}", branchName, repositoryName);
+                }
+                else
+                {
+                    _logger.LogWarning("Branch {BranchName} not found in repository {RepositoryName}", branchName, repositoryName);
+                }
+            }
+        }
+        finally
+        {
+            _updateLock.Release();
+        }
+    }
+
+    /// <summary>
     /// Initializes all configured repositories.
     /// Loads existing repository and branch metadata from the database.
     /// </summary>
@@ -112,14 +156,31 @@ public sealed class GitTrackerService : IDisposable
             if (state.IsCloned)
                 return;
 
+            bool needsClone = false;
+
             if (!Directory.Exists(state.LocalPath) || !GitRepository.IsValid(state.LocalPath))
+            {
+                needsClone = true;
+            }
+            else
+            {
+                // Check if existing repository is bare (from old configuration)
+                using var existingRepo = new GitRepository(state.LocalPath);
+                if (existingRepo.Info.IsBare)
+                {
+                    _logger.LogWarning("Repository {Name} at {Path} is bare, re-cloning with working tree", state.Name, state.LocalPath);
+                    needsClone = true;
+                }
+            }
+
+            if (needsClone)
             {
                 _logger.LogInformation("Cloning repository {Name} from {Url} to {Path}", state.Name, state.RemoteUrl, state.LocalPath);
 
-                // Clean up any existing directory that's not a valid repository
+                // Clean up any existing directory
                 if (Directory.Exists(state.LocalPath))
                 {
-                    _logger.LogWarning("Removing invalid repository directory at {Path}", state.LocalPath);
+                    _logger.LogWarning("Removing existing repository directory at {Path}", state.LocalPath);
                     Directory.Delete(state.LocalPath, recursive: true);
                 }
 
@@ -194,15 +255,26 @@ public sealed class GitTrackerService : IDisposable
 
         await Task.Run(() => Commands.Fetch(repo, remote.Name, refSpecs, fetchOptions, null), cancellationToken);
 
-        // Clear workspace cache after fetching updates so the next indexing will reload the workspace
-        _workspaceLoader.ClearCache(repoState.LocalPath);
-
         // Find the branch
         var remoteBranchName = $"origin/{branchName}";
         var branch = repo.Branches[remoteBranchName]
             ?? throw new InvalidOperationException($"Branch {branchName} not found in repository {repoState.Name}");
 
         var currentSha = branch.Tip.Sha;
+
+        // Checkout/reset the working tree to the fetched commit so MSBuildWorkspace sees current sources
+        // This is critical - without this, the working tree stays at the initial clone commit
+        var checkoutOptions = new CheckoutOptions
+        {
+            CheckoutModifiers = CheckoutModifiers.Force
+        };
+
+        await Task.Run(() => Commands.Checkout(repo, branch, checkoutOptions), cancellationToken);
+        _logger.LogDebug("Checked out branch {Branch} at {Sha} in repository {Repo}", branchName, currentSha, repoState.Name);
+
+        // Clear workspace cache for this branch after updating the working tree
+        // This marks the cache entry as stale without disposing it (safe for concurrent indexing)
+        _workspaceLoader.ClearCache(repoState.LocalPath, branchName);
 
         var branchState = repoState.Branches.GetValueOrDefault(branchName);
         if (branchState == null)

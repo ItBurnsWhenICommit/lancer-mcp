@@ -19,15 +19,19 @@ public sealed class WorkspaceLoader : IDisposable
     }
 
     /// <summary>
-    /// Gets or loads a workspace for the given repository path.
+    /// Gets or loads a workspace for the given repository path and branch.
+    /// Returns a handle with reference counting for safe disposal.
     /// Returns null if the workspace cannot be loaded.
     /// </summary>
-    public async Task<WorkspaceCache?> GetOrLoadWorkspaceAsync(string repositoryPath, CancellationToken cancellationToken = default)
+    public async Task<WorkspaceHandle?> GetOrLoadWorkspaceAsync(string repositoryPath, string branchName, CancellationToken cancellationToken = default)
     {
+        // Cache key includes both repository path and branch name
+        var cacheKey = $"{repositoryPath}:{branchName}";
+
         // Check cache first
-        if (_workspaceCache.TryGetValue(repositoryPath, out var cached))
+        if (_workspaceCache.TryGetValue(cacheKey, out var cached))
         {
-            return cached;
+            return cached.AcquireReference();
         }
 
         // Load workspace (with lock to prevent concurrent loads)
@@ -35,24 +39,30 @@ public sealed class WorkspaceLoader : IDisposable
         try
         {
             // Double-check after acquiring lock
-            if (_workspaceCache.TryGetValue(repositoryPath, out cached))
+            if (_workspaceCache.TryGetValue(cacheKey, out cached))
             {
-                return cached;
+                return cached.AcquireReference();
             }
 
-            _logger.LogInformation("Loading MSBuild workspace for repository: {RepositoryPath}", repositoryPath);
+            _logger.LogInformation("Loading MSBuild workspace for repository: {RepositoryPath}, branch: {BranchName}", repositoryPath, branchName);
 
-            var workspace = await LoadWorkspaceAsync(repositoryPath, cancellationToken);
+            // Note: Branch checkout is handled by GitTrackerService.EnsureBranchCheckedOutAsync
+            // which is called by IndexingService before loading workspace.
+            // This ensures synchronized access to the working tree.
+
+            var workspace = await LoadWorkspaceAsync(repositoryPath, branchName, cancellationToken);
             if (workspace != null)
             {
-                _workspaceCache[repositoryPath] = workspace;
+                _workspaceCache[cacheKey] = workspace;
                 _logger.LogInformation(
-                    "Loaded workspace with {ProjectCount} project(s) for repository: {RepositoryPath}",
+                    "Loaded workspace with {ProjectCount} project(s) for repository: {RepositoryPath}, branch: {BranchName}",
                     workspace.Projects.Count,
-                    repositoryPath);
+                    repositoryPath,
+                    branchName);
+                return workspace.AcquireReference();
             }
 
-            return workspace;
+            return null;
         }
         finally
         {
@@ -64,19 +74,16 @@ public sealed class WorkspaceLoader : IDisposable
     /// Loads an MSBuild workspace from the repository path.
     /// Looks for .sln files first, then .csproj files.
     /// </summary>
-    private async Task<WorkspaceCache?> LoadWorkspaceAsync(string repositoryPath, CancellationToken cancellationToken)
+    private async Task<WorkspaceCache?> LoadWorkspaceAsync(string repositoryPath, string branchName, CancellationToken cancellationToken)
     {
         try
         {
-            // Find solution or project files (search recursively up to 2 levels deep)
-            var solutionFiles = Directory.GetFiles(repositoryPath, "*.sln", SearchOption.AllDirectories);
-            var projectFiles = Directory.GetFiles(repositoryPath, "*.csproj", SearchOption.AllDirectories);
+            // Find solution or project files, skipping .git and build output directories
+            // This is much faster than Directory.GetFiles with AllDirectories which walks .git/objects
+            var solutionFiles = FindFilesExcludingDirectories(repositoryPath, "*.sln");
+            var projectFiles = FindFilesExcludingDirectories(repositoryPath, "*.csproj");
 
-            // Filter out obj/bin directories
-            solutionFiles = solutionFiles.Where(f => !f.Contains("/obj/") && !f.Contains("/bin/") && !f.Contains("\\obj\\") && !f.Contains("\\bin\\")).ToArray();
-            projectFiles = projectFiles.Where(f => !f.Contains("/obj/") && !f.Contains("/bin/") && !f.Contains("\\obj\\") && !f.Contains("\\bin\\")).ToArray();
-
-            if (solutionFiles.Length == 0 && projectFiles.Length == 0)
+            if (solutionFiles.Count == 0 && projectFiles.Count == 0)
             {
                 _logger.LogWarning("No .sln or .csproj files found in repository: {RepositoryPath}", repositoryPath);
                 return null;
@@ -96,7 +103,7 @@ public sealed class WorkspaceLoader : IDisposable
 
             // Load solution if available, otherwise load first project
             Solution solution;
-            if (solutionFiles.Length > 0)
+            if (solutionFiles.Count > 0)
             {
                 var solutionPath = solutionFiles[0];
                 _logger.LogInformation("Loading solution: {SolutionPath}", solutionPath);
@@ -155,7 +162,8 @@ public sealed class WorkspaceLoader : IDisposable
                 Workspace = workspace,
                 Solution = solution,
                 Projects = projects,
-                RepositoryPath = repositoryPath
+                RepositoryPath = repositoryPath,
+                BranchName = branchName
             };
         }
         catch (Exception ex)
@@ -167,13 +175,43 @@ public sealed class WorkspaceLoader : IDisposable
 
     /// <summary>
     /// Clears the workspace cache for a repository (e.g., after a git pull).
+    /// If branchName is specified, only clears that branch's cache.
+    /// Otherwise, clears all branches for the repository.
+    ///
+    /// This marks workspaces for disposal and removes them from the cache.
+    /// Actual disposal happens when all active references are released (safe for concurrent indexing).
     /// </summary>
-    public void ClearCache(string repositoryPath)
+    public void ClearCache(string repositoryPath, string? branchName = null)
     {
-        if (_workspaceCache.TryRemove(repositoryPath, out var cache))
+        if (branchName != null)
         {
-            cache.Workspace.Dispose();
-            _logger.LogInformation("Cleared workspace cache for repository: {RepositoryPath}", repositoryPath);
+            // Clear specific branch
+            var cacheKey = $"{repositoryPath}:{branchName}";
+            if (_workspaceCache.TryRemove(cacheKey, out var workspace))
+            {
+                workspace.MarkForDisposal();
+                _logger.LogInformation("Cleared workspace cache for repository: {RepositoryPath}, branch: {BranchName}", repositoryPath, branchName);
+            }
+        }
+        else
+        {
+            // Clear all branches for this repository
+            var keysToRemove = _workspaceCache.Keys
+                .Where(k => k.StartsWith($"{repositoryPath}:", StringComparison.Ordinal))
+                .ToList();
+
+            foreach (var key in keysToRemove)
+            {
+                if (_workspaceCache.TryRemove(key, out var workspace))
+                {
+                    workspace.MarkForDisposal();
+                }
+            }
+
+            if (keysToRemove.Count > 0)
+            {
+                _logger.LogInformation("Cleared workspace cache for {Count} branch(es) in repository: {RepositoryPath}", keysToRemove.Count, repositoryPath);
+            }
         }
     }
 
@@ -186,17 +224,163 @@ public sealed class WorkspaceLoader : IDisposable
         _workspaceCache.Clear();
         _loadLock.Dispose();
     }
+
+    /// <summary>
+    /// Recursively finds files matching a pattern while excluding build/IDE directories.
+    /// This is much more efficient than Directory.GetFiles with AllDirectories which walks .git/objects.
+    ///
+    /// Note: This uses a dedicated hard-coded list for workspace discovery, NOT the user-configurable
+    /// ExcludeFolders (which controls indexing scope). This ensures we can always find .sln/.csproj files
+    /// even if users exclude certain directories from indexing.
+    /// </summary>
+    private static List<string> FindFilesExcludingDirectories(string rootPath, string pattern)
+    {
+        // Hard-coded list of directories to skip during workspace discovery
+        // These are build outputs, IDE folders, and version control that should never contain .sln/.csproj
+        var excludedDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ".git",
+            "bin",
+            "obj",
+            "node_modules",
+            ".vs",
+            ".vscode",
+            "packages",
+            "dist",
+            "build",
+            "target",
+            ".next",
+            ".nuget"
+        };
+
+        var results = new List<string>();
+        var dirsToSearch = new Queue<string>();
+        dirsToSearch.Enqueue(rootPath);
+
+        while (dirsToSearch.Count > 0)
+        {
+            var currentDir = dirsToSearch.Dequeue();
+
+            try
+            {
+                // Add matching files from current directory
+                results.AddRange(Directory.GetFiles(currentDir, pattern, SearchOption.TopDirectoryOnly));
+
+                // Queue subdirectories that aren't excluded
+                foreach (var subDir in Directory.GetDirectories(currentDir))
+                {
+                    var dirName = Path.GetFileName(subDir);
+                    if (!excludedDirs.Contains(dirName))
+                    {
+                        dirsToSearch.Enqueue(subDir);
+                    }
+                }
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Skip directories we can't access
+            }
+            catch (DirectoryNotFoundException)
+            {
+                // Skip directories that were deleted during traversal
+            }
+        }
+
+        return results;
+    }
 }
 
 /// <summary>
-/// Cached workspace data for a repository.
+/// Cached workspace data for a repository branch with reference counting for safe disposal.
 /// </summary>
-public sealed class WorkspaceCache
+public sealed class WorkspaceCache : IDisposable
 {
+    private int _referenceCount;
+    private bool _isMarkedForDisposal;
+    private readonly object _lock = new();
+
     public required MSBuildWorkspace Workspace { get; init; }
     public required Solution Solution { get; init; }
     public required Dictionary<string, ProjectCache> Projects { get; init; }
     public required string RepositoryPath { get; init; }
+    public required string BranchName { get; init; }
+
+    /// <summary>
+    /// Increments the reference count. Returns a disposable handle that decrements on disposal.
+    /// </summary>
+    public WorkspaceHandle AcquireReference()
+    {
+        lock (_lock)
+        {
+            _referenceCount++;
+            return new WorkspaceHandle(this);
+        }
+    }
+
+    /// <summary>
+    /// Decrements the reference count and disposes if marked for disposal and count reaches zero.
+    /// </summary>
+    internal void ReleaseReference()
+    {
+        lock (_lock)
+        {
+            _referenceCount--;
+            if (_referenceCount == 0 && _isMarkedForDisposal)
+            {
+                DisposeInternal();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Marks this workspace for disposal. Will dispose immediately if no references, otherwise waits.
+    /// </summary>
+    public void MarkForDisposal()
+    {
+        lock (_lock)
+        {
+            _isMarkedForDisposal = true;
+            if (_referenceCount == 0)
+            {
+                DisposeInternal();
+            }
+        }
+    }
+
+    private void DisposeInternal()
+    {
+        Workspace?.Dispose();
+    }
+
+    public void Dispose()
+    {
+        MarkForDisposal();
+    }
+}
+
+/// <summary>
+/// Handle that represents a reference to a WorkspaceCache. Releases the reference on disposal.
+/// </summary>
+public sealed class WorkspaceHandle : IDisposable
+{
+    private readonly WorkspaceCache _cache;
+    private bool _disposed;
+
+    internal WorkspaceHandle(WorkspaceCache cache)
+    {
+        _cache = cache;
+    }
+
+    public WorkspaceCache Cache => _cache;
+
+    public void Dispose()
+    {
+        if (!_disposed)
+        {
+            _cache.ReleaseReference();
+            _disposed = true;
+        }
+    }
 }
 
 /// <summary>
