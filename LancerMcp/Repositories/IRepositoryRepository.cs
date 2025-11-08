@@ -224,7 +224,7 @@ public interface ISymbolRepository
     /// <summary>
     /// Searches symbols by name (exact or fuzzy).
     /// </summary>
-    Task<IEnumerable<Symbol>> SearchByNameAsync(string repoId, string query, bool fuzzy = false, int limit = 50, CancellationToken cancellationToken = default);
+    Task<IEnumerable<Symbol>> SearchByNameAsync(string repoId, string query, string? branchName = null, bool fuzzy = false, int limit = 50, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Gets symbols by kind.

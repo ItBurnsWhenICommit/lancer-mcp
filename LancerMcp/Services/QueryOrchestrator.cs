@@ -52,22 +52,28 @@ public sealed class QueryOrchestrator
 
     /// <summary>
     /// Execute a query and return ranked results.
+    /// Repository parameter is required - multi-repo queries are not supported.
     /// </summary>
     public async Task<QueryResponse> QueryAsync(
         string query,
-        string? repositoryName = null,
+        string repositoryName,
         string? branchName = null,
         Language? language = null,
         int maxResults = 50,
         CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(repositoryName))
+        {
+            throw new ArgumentException("Repository name is required. Multi-repo queries are not supported.", nameof(repositoryName));
+        }
+
         var stopwatch = Stopwatch.StartNew();
 
         try
         {
             // Step 1: Parse and analyze the query
             var parsedQuery = ParseQuery(query, repositoryName, branchName, language, maxResults);
-            _logger.LogInformation("Query intent detected: {Intent}", parsedQuery.Intent);
+            _logger.LogInformation("Query intent detected: {Intent} for repository: {Repository}", parsedQuery.Intent, repositoryName);
 
             // Step 2: Execute search based on intent
             var results = await ExecuteSearchAsync(parsedQuery, cancellationToken);
@@ -94,7 +100,7 @@ public sealed class QueryOrchestrator
                 Metadata = new Dictionary<string, object>
                 {
                     ["keywords"] = parsedQuery.Keywords,
-                    ["repository"] = repositoryName ?? "all",
+                    ["repository"] = repositoryName,
                     ["branch"] = branchName ?? "all"
                 }
             };
@@ -111,7 +117,7 @@ public sealed class QueryOrchestrator
     /// </summary>
     private ParsedQuery ParseQuery(
         string query,
-        string? repositoryName,
+        string repositoryName,
         string? branchName,
         Language? language,
         int maxResults)
@@ -264,6 +270,7 @@ public sealed class QueryOrchestrator
                 var symbols = await _symbolRepository.SearchByNameAsync(
                     parsedQuery.RepositoryName ?? string.Empty,
                     symbolName,
+                    parsedQuery.BranchName,
                     fuzzy: true,
                     limit: parsedQuery.MaxResults,
                     cancellationToken);
@@ -302,6 +309,7 @@ public sealed class QueryOrchestrator
             var symbols = await _symbolRepository.SearchByNameAsync(
                 parsedQuery.RepositoryName ?? string.Empty,
                 query,
+                parsedQuery.BranchName,
                 fuzzy: true,
                 limit: parsedQuery.MaxResults,
                 cancellationToken);
@@ -356,6 +364,7 @@ public sealed class QueryOrchestrator
                 var symbols = await _symbolRepository.SearchByNameAsync(
                     parsedQuery.RepositoryName ?? string.Empty,
                     symbolName,
+                    parsedQuery.BranchName,
                     fuzzy: true,
                     limit: 5,
                     cancellationToken);
@@ -615,8 +624,9 @@ public sealed class QueryOrchestrator
     {
         var results = new List<SearchResult>();
 
+        // Repository name is guaranteed to be non-null by QueryAsync validation
         var chunks = await _chunkRepository.SearchFullTextAsync(
-            repoId: parsedQuery.RepositoryName ?? string.Empty,
+            repoId: parsedQuery.RepositoryName!,
             query: parsedQuery.OriginalQuery,
             branchName: parsedQuery.BranchName,
             language: parsedQuery.Language,
@@ -675,6 +685,7 @@ public sealed class QueryOrchestrator
             var symbols = await _symbolRepository.SearchByNameAsync(
                 result.Repository,
                 result.SymbolName,
+                result.Branch,
                 fuzzy: false,
                 limit: 1,
                 cancellationToken);

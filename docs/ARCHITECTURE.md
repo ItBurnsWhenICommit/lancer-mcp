@@ -23,8 +23,8 @@ The server handles all complexity server-side:
 ```typescript
 // MCP Tool Signature
 Query(
+  repository: string,      // Required: repository name to search
   query: string,           // Natural language query
-  repository?: string,     // Optional: filter to specific repo
   branch?: string,         // Optional: filter to specific branch
   maxResults?: number      // Optional: limit results
 ) -> QueryResult
@@ -34,19 +34,16 @@ Query(
 
 ```javascript
 // Code search
-Query("find all classes that implement IRepository")
+Query(repository: "my-api", query: "find all classes that implement IRepository")
 
 // Symbol lookup
-Query("show me the definition of UserService")
+Query(repository: "my-api", query: "show me the definition of UserService")
 
 // Find references
-Query("what calls the Login method?")
+Query(repository: "my-api", query: "what calls the Login method?")
 
 // Recent changes
-Query("find recent changes in authentication code")
-
-// Cross-repository search
-Query("find all uses of dependency injection", repository: "my-api")
+Query(repository: "my-api", query: "find recent changes in authentication code")
 
 // Branch-specific search
 Query("what changed in the new feature?", branch: "feature/new-auth")
@@ -161,7 +158,7 @@ The server can return different result types based on query intent:
 
 ### ✅ Fully Implemented Features
 
-1. **Single MCP Tool**: `Query` tool with natural language interface
+1. **Single MCP Tool**: `Query` tool with natural language interface (per-repository queries)
 2. **Git Tracking**: Repositories are cloned, tracked, and persisted to PostgreSQL
 3. **Branch Management**: Default + on-demand branch tracking with database persistence
 4. **Incremental Updates**: Change detection between commits with SHA cursors
@@ -185,7 +182,6 @@ The `Query` tool supports:
 - **Reference search**: "what calls the Login method?"
 - **Semantic search**: "find code that validates email addresses"
 - **Recent changes**: "find recent changes in authentication code"
-- **Cross-repository**: Search across all configured repositories
 - **Code navigation**: Symbol definitions, implementations, references
 
 ## Testing the Implementation

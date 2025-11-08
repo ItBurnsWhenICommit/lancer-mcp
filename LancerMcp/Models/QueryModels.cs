@@ -258,5 +258,76 @@ public sealed class QueryResponse
     /// Additional context or metadata
     /// </summary>
     public Dictionary<string, object>? Metadata { get; init; }
+
+    /// <summary>
+    /// Converts the response to an optimized format for AI consumption.
+    /// Removes redundant fields (repository/branch duplicated per result, always-null scores, internal IDs).
+    /// Shortens field names for minimal payload size.
+    /// </summary>
+    public object ToOptimizedFormat()
+    {
+        // Extract repository and branch from metadata (single-repo queries)
+        var repository = Metadata?.TryGetValue("repository", out var repo) == true ? repo?.ToString() : "unknown";
+        var branch = Metadata?.TryGetValue("branch", out var br) == true ? br?.ToString() : "unknown";
+
+        return new
+        {
+            repo = repository,
+            branch = branch,
+            query = Query,
+            intent = Intent.ToString(),
+            total = TotalResults,
+            results = Results.Select(r =>
+            {
+                // Build minimal result object - only include non-null, relevant fields
+                var minimalResult = new Dictionary<string, object?>
+                {
+                    ["file"] = r.FilePath,
+                    ["lines"] = $"{r.StartLine}-{r.EndLine}",
+                    ["score"] = Math.Round(r.Score, 2),
+                    ["type"] = r.Type
+                };
+
+                // Add symbol info if present
+                if (!string.IsNullOrEmpty(r.SymbolName))
+                {
+                    minimalResult["symbol"] = r.SymbolName;
+                    if (r.SymbolKind.HasValue)
+                        minimalResult["kind"] = r.SymbolKind.Value.ToString();
+                }
+
+                // Add signature if present (more useful than full content for symbols)
+                if (!string.IsNullOrEmpty(r.Signature))
+                    minimalResult["sig"] = r.Signature;
+                else if (!string.IsNullOrEmpty(r.Content))
+                    minimalResult["content"] = r.Content;
+
+                // Add documentation if present
+                if (!string.IsNullOrEmpty(r.Documentation))
+                    minimalResult["docs"] = r.Documentation;
+
+                // Add graph score if present (only meaningful score component)
+                if (r.GraphScore.HasValue && r.GraphScore.Value > 0)
+                    minimalResult["graphScore"] = Math.Round(r.GraphScore.Value, 2);
+
+                // Add related symbols if present (for call graphs, references, etc.)
+                if (r.RelatedSymbols?.Count > 0)
+                {
+                    minimalResult["related"] = r.RelatedSymbols.Select(rs => new
+                    {
+                        name = rs.Name,
+                        kind = rs.Kind.ToString(),
+                        rel = rs.RelationType,
+                        file = rs.FilePath,
+                        line = rs.Line
+                    }).ToArray();
+                }
+
+                return minimalResult;
+            }).ToArray(),
+            time = ExecutionTimeMs,
+            suggestions = SuggestedQueries
+        };
+    }
 }
 

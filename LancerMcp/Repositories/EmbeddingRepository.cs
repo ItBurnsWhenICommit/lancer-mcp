@@ -66,18 +66,18 @@ public sealed class EmbeddingRepository : IEmbeddingRepository
         int limit = 50,
         CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(repoId))
+        {
+            throw new ArgumentException("Repository ID is required. Multi-repo queries are not supported.", nameof(repoId));
+        }
+
         var sql = @"
             SELECT id, chunk_id AS ChunkId, repo_id AS RepositoryName, branch_name AS BranchName,
                    commit_sha AS CommitSha, vector::text AS Vector, model, model_version AS ModelVersion,
                    generated_at AS GeneratedAt,
                    vector <=> @QueryVector::vector AS distance
             FROM embeddings
-            WHERE 1=1";
-
-        if (!string.IsNullOrEmpty(repoId))
-        {
-            sql += " AND repo_id = @RepoId";
-        }
+            WHERE repo_id = @RepoId";
 
         if (!string.IsNullOrEmpty(branchName))
         {
@@ -118,6 +118,11 @@ public sealed class EmbeddingRepository : IEmbeddingRepository
         int limit = 50,
         CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(repoId))
+        {
+            throw new ArgumentException("Repository ID is required. Multi-repo queries are not supported.", nameof(repoId));
+        }
+
         const string sql = @"
             SELECT * FROM hybrid_search(
                 @QueryText,

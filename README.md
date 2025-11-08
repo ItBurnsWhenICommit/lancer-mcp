@@ -16,7 +16,7 @@ This is a **LAN-hosted MCP server** written in C#/.NET that:
 - Generates code embeddings using jina-embeddings-v2-base-code
 - Stores data in PostgreSQL with pgvector for vector similarity search
 - Provides hybrid search combining BM25 full-text + vector semantic search + graph re-ranking
-- Exposes a single `Query` MCP tool for AI agents (Faster than multi-tool solutions)
+- Exposes a single `Query` MCP tool for AI agents with per-repository queries
 - Self-hosted alternative to cloud-based code indexing services
 
 ## 💡 Why This Was Made
