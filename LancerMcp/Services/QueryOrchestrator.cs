@@ -34,6 +34,16 @@ public sealed class QueryOrchestrator
         @"\b(example|usage|how to use|sample|demo)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    // Pattern to detect exact symbol names (PascalCase, camelCase, or specific class/method names)
+    private static readonly Regex ExactSymbolPattern = new(
+        @"\b([A-Z][a-zA-Z0-9]*(?:\.[A-Z][a-zA-Z0-9]*)*)\b",
+        RegexOptions.Compiled);
+
+    // Pattern to detect conceptual/descriptive queries (multiple common words)
+    private static readonly Regex ConceptualPattern = new(
+        @"\b(code|logic|handling|handler|manager|service|utility|helper|function|method|class)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     public QueryOrchestrator(
         ILogger<QueryOrchestrator> logger,
         ICodeChunkRepository chunkRepository,
@@ -155,22 +165,44 @@ public sealed class QueryOrchestrator
     }
 
     /// <summary>
-    /// Detect the intent of the query.
+    /// Detect the intent of the query with improved heuristics.
     /// </summary>
     private QueryIntent DetectIntent(string query)
     {
-        if (NavigationPattern.IsMatch(query))
-            return QueryIntent.Navigation;
-
+        // Check for Relations intent first (most specific)
         if (RelationsPattern.IsMatch(query))
             return QueryIntent.Relations;
 
+        // Check for Documentation/Examples intents
         if (DocumentationPattern.IsMatch(query))
             return QueryIntent.Documentation;
 
         if (ExamplesPattern.IsMatch(query))
             return QueryIntent.Examples;
 
+        // Improved Navigation vs Search detection
+        if (NavigationPattern.IsMatch(query))
+        {
+            // Check if this looks like an exact symbol lookup vs conceptual search
+            // "find QueryOrchestrator class" -> Navigation (exact symbol)
+            // "find error handling code" -> Search (conceptual)
+
+            var hasExactSymbol = ExactSymbolPattern.IsMatch(query);
+            var hasConceptualTerms = ConceptualPattern.Matches(query).Count >= 2;
+
+            // If query has conceptual terms but no clear exact symbol, treat as Search
+            if (hasConceptualTerms && !hasExactSymbol)
+                return QueryIntent.Search;
+
+            // If query has exact symbol name, treat as Navigation
+            if (hasExactSymbol)
+                return QueryIntent.Navigation;
+
+            // Default to Navigation for "find X" patterns
+            return QueryIntent.Navigation;
+        }
+
+        // Default to Search for everything else
         return QueryIntent.Search;
     }
 
@@ -230,19 +262,37 @@ public sealed class QueryOrchestrator
     }
 
     /// <summary>
-    /// Execute the search based on parsed query.
+    /// Execute the search based on parsed query with fallback mechanism.
     /// </summary>
     private async Task<List<SearchResult>> ExecuteSearchAsync(
         ParsedQuery parsedQuery,
         CancellationToken cancellationToken)
     {
+        List<SearchResult> results;
+
         switch (parsedQuery.Intent)
         {
             case QueryIntent.Navigation:
-                return await ExecuteNavigationSearchAsync(parsedQuery, cancellationToken);
+                results = await ExecuteNavigationSearchAsync(parsedQuery, cancellationToken);
+
+                // Fallback: If Navigation returns 0 results, try hybrid search
+                if (!results.Any())
+                {
+                    _logger.LogInformation("Navigation search returned 0 results, falling back to hybrid search");
+                    results = await ExecuteHybridSearchAsync(parsedQuery, cancellationToken);
+                }
+                return results;
 
             case QueryIntent.Relations:
-                return await ExecuteRelationsSearchAsync(parsedQuery, cancellationToken);
+                results = await ExecuteRelationsSearchAsync(parsedQuery, cancellationToken);
+
+                // Fallback: If Relations returns 0 results, try hybrid search
+                if (!results.Any())
+                {
+                    _logger.LogInformation("Relations search returned 0 results, falling back to hybrid search");
+                    results = await ExecuteHybridSearchAsync(parsedQuery, cancellationToken);
+                }
+                return results;
 
             case QueryIntent.Documentation:
             case QueryIntent.Examples:
@@ -503,7 +553,87 @@ public sealed class QueryOrchestrator
             }
         }
 
+        // Optionally enrich with semantic context if we have results
+        if (results.Any() && parsedQuery.IncludeRelated)
+        {
+            results = await EnrichRelationsWithSemanticContextAsync(results, parsedQuery, cancellationToken);
+        }
+
         return results;
+    }
+
+    /// <summary>
+    /// Enrich relation results with semantic context from hybrid search.
+    /// This adds related code chunks that provide context around the relationships.
+    /// </summary>
+    private async Task<List<SearchResult>> EnrichRelationsWithSemanticContextAsync(
+        List<SearchResult> relationResults,
+        ParsedQuery parsedQuery,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Build a query from the original query to find semantic context
+            // For example, "what calls QueryAsync" -> find code chunks about QueryAsync
+            var contextQuery = string.Join(" ", parsedQuery.Keywords);
+
+            // Get a few semantic results for context (limit to 5 to avoid overwhelming)
+            var contextParsedQuery = new ParsedQuery
+            {
+                OriginalQuery = contextQuery,
+                Intent = QueryIntent.Search,
+                Keywords = parsedQuery.Keywords,
+                SymbolNames = parsedQuery.SymbolNames,
+                FilePaths = parsedQuery.FilePaths,
+                Language = parsedQuery.Language,
+                RepositoryName = parsedQuery.RepositoryName,
+                BranchName = parsedQuery.BranchName,
+                IncludeRelated = false,
+                MaxResults = 5
+            };
+
+            var contextResults = await ExecuteHybridSearchAsync(contextParsedQuery, cancellationToken);
+
+            // Filter out context results that are already in the relation results
+            var relationSymbolIds = new HashSet<string>(relationResults.Select(r => r.Id));
+            var uniqueContextResults = contextResults
+                .Where(cr => !relationSymbolIds.Contains(cr.Id))
+                .Take(3) // Only add top 3 context results
+                .Select(cr => new SearchResult
+                {
+                    Id = cr.Id,
+                    Type = "semantic_context",
+                    Repository = cr.Repository,
+                    Branch = cr.Branch,
+                    FilePath = cr.FilePath,
+                    Language = cr.Language,
+                    SymbolName = cr.SymbolName,
+                    SymbolKind = cr.SymbolKind,
+                    Content = cr.Content,
+                    StartLine = cr.StartLine,
+                    EndLine = cr.EndLine,
+                    Score = cr.Score * 0.5f, // Lower score to indicate it's context, not primary result
+                    BM25Score = cr.BM25Score,
+                    VectorScore = cr.VectorScore,
+                    Signature = cr.Signature,
+                    Documentation = cr.Documentation
+                })
+                .ToList();
+
+            // Append context results after the primary relation results
+            if (uniqueContextResults.Any())
+            {
+                _logger.LogInformation("Added {Count} semantic context results to relations query", uniqueContextResults.Count);
+                relationResults.AddRange(uniqueContextResults);
+            }
+
+            return relationResults;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to enrich relations with semantic context, returning original results");
+            return relationResults;
+        }
     }
 
     /// <summary>
