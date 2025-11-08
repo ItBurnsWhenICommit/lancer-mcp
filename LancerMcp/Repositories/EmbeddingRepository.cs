@@ -149,7 +149,7 @@ public sealed class EmbeddingRepository : IEmbeddingRepository
 
         return results.Select(r => (
             ChunkId: (string)r.chunk_id,
-            Score: (float)r.score,
+            Score: (float)r.combined_score,
             BM25Score: r.bm25_score != null ? (float?)r.bm25_score : null,
             VectorScore: r.vector_score != null ? (float?)r.vector_score : null
         ));
