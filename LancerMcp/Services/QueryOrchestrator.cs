@@ -18,30 +18,69 @@ public sealed class QueryOrchestrator
     private readonly EmbeddingService _embeddingService;
 
     // Intent detection patterns
+
+    /// <summary>
+    /// Pattern for Navigation queries - finding specific symbols or definitions
+    /// Examples: "find QueryOrchestrator", "show me the User class", "where is the login method"
+    /// </summary>
     private static readonly Regex NavigationPattern = new(
-        @"\b(find|show|where is|locate|go to|definition of|navigate to)\b",
+        @"\b(find|show|where is|locate|go to|jump to|open|view|display|get|lookup|navigate to|definition of|declaration of)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    /// <summary>
+    /// Pattern for Relations queries - finding relationships between symbols
+    /// Examples: "what calls X", "what does X call", "dependencies of X", "who uses X"
+    /// </summary>
     private static readonly Regex RelationsPattern = new(
-        @"\b(calls?|references?|uses?|depends? on|implements?|extends?|inherits?|call chain|callers?|callees?)\b",
+        @"\b(calls?|called by|references?|referenced by|uses?|used by|depends? on|dependen(ts?|cies)|implements?|implemented by|extends?|extended by|inherits?|inherited by|overrides?|overridden by|invokes?|invoked by|imports?|imported by|requires?|required by|call chain|callers?|callees?|subclasses?|superclasses?|children|parents|who (calls?|uses?|references?|depends on|implements?|extends?|inherits?))\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    /// <summary>
+    /// Pattern for Documentation queries - getting explanations or understanding code
+    /// Examples: "explain how X works", "what does X do", "tell me about X"
+    /// </summary>
     private static readonly Regex DocumentationPattern = new(
-        @"\b(what (is|does)|explain|describe|documentation|how (does|to)|purpose of)\b",
+        @"\b(what (is|does|are)|explain|describe|documentation|docs|how (does|do|to)|purpose of|why|tell me about|info about|information about|details about|overview of|summary of|understand|learn about)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    /// <summary>
+    /// Pattern for Examples queries - finding usage patterns or code samples
+    /// Examples: "show me how to use X", "example of X", "usage pattern for X"
+    /// </summary>
     private static readonly Regex ExamplesPattern = new(
-        @"\b(example|usage|how to use|sample|demo)\b",
+        @"\b(example|usage|how to use|sample|demo|show me how|tutorial|guide|pattern|best practice|snippet|code sample)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    // Pattern to detect exact symbol names (PascalCase, camelCase, or specific class/method names)
+    /// <summary>
+    /// Pattern for explicit Search queries - finding code by concept or functionality
+    /// Examples: "search for error handling", "find code that validates input", "implementation of authentication"
+    /// </summary>
+    private static readonly Regex SearchPattern = new(
+        @"\b(search|look for|find (code|logic|implementation|algorithm) (that|for|which)|code (that|for|which)|logic (that|for|which)|implementation of|algorithm for)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// Pattern to detect exact symbol names (PascalCase, camelCase, or specific class/method names)
+    /// Examples: "QueryOrchestrator", "getUserById", "IRepository"
+    /// </summary>
     private static readonly Regex ExactSymbolPattern = new(
         @"\b([A-Z][a-zA-Z0-9]*(?:\.[A-Z][a-zA-Z0-9]*)*)\b",
         RegexOptions.Compiled);
 
-    // Pattern to detect conceptual/descriptive queries (multiple common words)
+    /// <summary>
+    /// Pattern to detect conceptual/descriptive queries (multiple common programming terms)
+    /// Examples: "error handling code", "database connection logic", "authentication service"
+    /// </summary>
     private static readonly Regex ConceptualPattern = new(
-        @"\b(code|logic|handling|handler|manager|service|utility|helper|function|method|class)\b",
+        @"\b(code|logic|handling|handler|manager|service|utility|helper|function|method|class|interface|struct|enum|type|component|module|package|library|framework|pattern|strategy|factory|builder|adapter|decorator|proxy|singleton|observer|command|state|template|visitor|chain|mediator|memento|prototype|bridge|composite|facade|flyweight|interpreter|iterator|algorithm|implementation|validation|authentication|authorization|configuration|initialization|setup|cleanup|processing|parsing|formatting|serialization|deserialization|encoding|decoding|encryption|decryption|compression|decompression|caching|logging|monitoring|tracing|debugging|testing|mocking|stubbing|assertion|verification)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// Pattern to detect file-based queries
+    /// Examples: "files in src/", "code in controllers/", "*.cs files"
+    /// </summary>
+    private static readonly Regex FilePattern = new(
+        @"(files? (in|under|within)|\.([a-z]{1,4})\s|/[a-zA-Z0-9_\-/]+/)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public QueryOrchestrator(
@@ -166,27 +205,35 @@ public sealed class QueryOrchestrator
 
     /// <summary>
     /// Detect the intent of the query with improved heuristics.
+    /// Order matters: check more specific patterns first to avoid false positives.
     /// </summary>
     private QueryIntent DetectIntent(string query)
     {
-        // Check for Relations intent first (most specific)
+        // 1. Check for Relations intent first (most specific patterns)
+        // Examples: "what calls X", "dependencies of Y", "who uses Z"
         if (RelationsPattern.IsMatch(query))
             return QueryIntent.Relations;
 
-        // Check for Documentation/Examples intents
+        // 2. Check for Documentation intent
+        // Examples: "explain how X works", "what does Y do", "tell me about Z"
         if (DocumentationPattern.IsMatch(query))
             return QueryIntent.Documentation;
 
+        // 3. Check for Examples intent
+        // Examples: "show me how to use X", "example of Y", "usage pattern for Z"
         if (ExamplesPattern.IsMatch(query))
             return QueryIntent.Examples;
 
-        // Improved Navigation vs Search detection
+        // 4. Check for explicit Search patterns
+        // Examples: "search for error handling", "find code that validates input"
+        if (SearchPattern.IsMatch(query))
+            return QueryIntent.Search;
+
+        // 5. Improved Navigation vs Search detection
+        // Navigation: "find QueryOrchestrator class" (exact symbol)
+        // Search: "find error handling code" (conceptual)
         if (NavigationPattern.IsMatch(query))
         {
-            // Check if this looks like an exact symbol lookup vs conceptual search
-            // "find QueryOrchestrator class" -> Navigation (exact symbol)
-            // "find error handling code" -> Search (conceptual)
-
             var hasExactSymbol = ExactSymbolPattern.IsMatch(query);
             var hasConceptualTerms = ConceptualPattern.Matches(query).Count >= 2;
 
@@ -202,7 +249,13 @@ public sealed class QueryOrchestrator
             return QueryIntent.Navigation;
         }
 
-        // Default to Search for everything else
+        // 6. Check if query is file-based
+        // Examples: "files in src/", "*.cs files"
+        if (FilePattern.IsMatch(query))
+            return QueryIntent.Search;
+
+        // 7. Default to Search for everything else
+        // This handles general queries like "authentication", "database connection", etc.
         return QueryIntent.Search;
     }
 
