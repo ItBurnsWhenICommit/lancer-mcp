@@ -2,6 +2,14 @@ using Microsoft.Extensions.Options;
 using LancerMcp.Configuration;
 using LancerMcp.Repositories;
 using LancerMcp.Services;
+using Microsoft.Build.Locator;
+
+// Register MSBuild locator before any MSBuildWorkspace is created
+// This is required for MSBuildWorkspace to find MSBuild assemblies
+if (!MSBuildLocator.IsRegistered)
+{
+    MSBuildLocator.RegisterDefaults();
+}
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -62,6 +70,7 @@ builder.Services.AddSingleton<RoslynParserService>();
 builder.Services.AddSingleton<BasicParserService>();
 builder.Services.AddSingleton<ChunkingService>();
 builder.Services.AddSingleton<QueryOrchestrator>();
+builder.Services.AddSingleton<WorkspaceLoader>();
 
 // Configure HttpClient for EmbeddingService with proper BaseAddress and Timeout
 builder.Services.AddHttpClient<EmbeddingService>((serviceProvider, client) =>

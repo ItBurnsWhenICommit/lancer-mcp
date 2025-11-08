@@ -21,6 +21,7 @@ public sealed class IndexingService
     private readonly BasicParserService _basicParser;
     private readonly ChunkingService _chunkingService;
     private readonly EmbeddingService _embeddingService;
+    private readonly WorkspaceLoader _workspaceLoader;
     private readonly IRepositoryRepository _repositoryRepository;
     private readonly ICommitRepository _commitRepository;
     private readonly IFileRepository _fileRepository;
@@ -40,6 +41,7 @@ public sealed class IndexingService
         BasicParserService basicParser,
         ChunkingService chunkingService,
         EmbeddingService embeddingService,
+        WorkspaceLoader workspaceLoader,
         IRepositoryRepository repositoryRepository,
         ICommitRepository commitRepository,
         IFileRepository fileRepository,
@@ -57,6 +59,7 @@ public sealed class IndexingService
         _basicParser = basicParser;
         _chunkingService = chunkingService;
         _embeddingService = embeddingService;
+        _workspaceLoader = workspaceLoader;
         _repositoryRepository = repositoryRepository;
         _commitRepository = commitRepository;
         _fileRepository = fileRepository;
@@ -83,6 +86,16 @@ public sealed class IndexingService
             return result;
         }
 
+        // Step 0: Load workspace for the repository (if available)
+        var firstChange = fileChangesList.First();
+        var repositoryPath = _gitTracker.GetRepositoryPath(firstChange.RepositoryName);
+        WorkspaceCache? workspaceCache = null;
+
+        if (!string.IsNullOrEmpty(repositoryPath))
+        {
+            workspaceCache = await _workspaceLoader.GetOrLoadWorkspaceAsync(repositoryPath, cancellationToken);
+        }
+
         // Step 1: Parse all files and handle deletions
         foreach (var fileChange in fileChangesList)
         {
@@ -95,7 +108,7 @@ public sealed class IndexingService
                 continue;
             }
 
-            tasks.Add(IndexFileAsync(fileChange, cancellationToken));
+            tasks.Add(IndexFileAsync(fileChange, workspaceCache, cancellationToken));
         }
 
         var parsedFiles = await Task.WhenAll(tasks);
@@ -137,7 +150,6 @@ public sealed class IndexingService
         }
 
         // Step 3: Automatically mark the branch as indexed after successful indexing
-        var firstChange = fileChangesList.First();
         _gitTracker.MarkBranchAsIndexed(firstChange.RepositoryName, firstChange.BranchName);
 
         return result;
@@ -146,7 +158,7 @@ public sealed class IndexingService
     /// <summary>
     /// Indexes a single file.
     /// </summary>
-    private async Task<ParsedFile?> IndexFileAsync(FileChange fileChange, CancellationToken cancellationToken)
+    private async Task<ParsedFile?> IndexFileAsync(FileChange fileChange, WorkspaceCache? workspaceCache, CancellationToken cancellationToken)
     {
         await _concurrencyLimiter.WaitAsync(cancellationToken);
         try
@@ -185,12 +197,20 @@ public sealed class IndexingService
             ParsedFile parsedFile;
             if (language == Language.CSharp)
             {
+                // Try to find the compilation for this file's project
+                Microsoft.CodeAnalysis.Compilation? compilation = null;
+                if (workspaceCache != null)
+                {
+                    compilation = FindCompilationForFile(workspaceCache, fileChange.FilePath);
+                }
+
                 parsedFile = await _roslynParser.ParseFileAsync(
                     fileChange.RepositoryName,
                     fileChange.BranchName,
                     fileChange.CommitSha,
                     fileChange.FilePath,
                     content,
+                    compilation,
                     cancellationToken);
             }
             else
@@ -330,12 +350,16 @@ public sealed class IndexingService
                 _logger.LogInformation("Persisted {Count} symbols", allSymbols.Count);
             }
 
-            // Step 3e: Persist edges
+            // Step 3e: Resolve cross-file edges
             var allEdges = parsedFiles.SelectMany(f => f.Edges).ToList();
             if (allEdges.Any())
             {
-                await CreateEdgesBatchTransactionalAsync(connection, transaction, allEdges, cancellationToken);
-                _logger.LogInformation("Persisted {Count} edges", allEdges.Count);
+                _logger.LogInformation("Resolving cross-file edges for {Count} edges...", allEdges.Count);
+                var (resolvedEdges, resolvedCount) = await ResolveCrossFileEdgesAsync(connection, transaction, allEdges, allSymbols, cancellationToken);
+                _logger.LogInformation("Resolved {ResolvedCount} cross-file edges out of {TotalCount}", resolvedCount, allEdges.Count);
+
+                await CreateEdgesBatchTransactionalAsync(connection, transaction, resolvedEdges, cancellationToken);
+                _logger.LogInformation("Persisted {Count} edges", resolvedEdges.Count);
             }
 
             // Step 3f: Persist chunks
@@ -651,11 +675,220 @@ public sealed class IndexingService
         var command = new CommandDefinition(sql, embeddingsList, transaction, cancellationToken: cancellationToken);
         await connection.ExecuteAsync(command);
     }
+
+    /// <summary>
+    /// Normalizes a qualified name for matching by:
+    /// 1. Removing generic type arguments (e.g., "Method<int>" -> "Method<>")
+    /// 2. Removing parameter lists (e.g., "Method(int, string)" -> "Method")
+    /// 3. Extracting the class.method portion (e.g., "Namespace.Class.Method" -> "Class.Method")
+    /// This allows matching partial qualified names from fallback parsing to full qualified names.
+    /// </summary>
+    private string NormalizeQualifiedName(string qualifiedName)
+    {
+        // Step 1: Replace generic type arguments with empty brackets
+        // E.g., "QueryAsync<CodeChunk>" -> "QueryAsync<>"
+        var normalized = System.Text.RegularExpressions.Regex.Replace(
+            qualifiedName,
+            @"<[^>]+>",
+            "<>");
+
+        // Step 2: Remove parameter lists
+        // E.g., "QueryAsync<>(string, object?, CancellationToken)" -> "QueryAsync<>"
+        var parenIndex = normalized.IndexOf('(');
+        if (parenIndex >= 0)
+        {
+            normalized = normalized.Substring(0, parenIndex);
+        }
+
+        // Step 3: Extract the last two parts (Class.Method)
+        // E.g., "LancerMcp.Services.DatabaseService.QueryAsync<>" -> "DatabaseService.QueryAsync<>"
+        // This allows matching "DatabaseService.QueryAsync" from fallback to full qualified names
+        var parts = normalized.Split('.');
+        if (parts.Length >= 2)
+        {
+            normalized = string.Join(".", parts.Skip(parts.Length - 2));
+        }
+
+        return normalized;
+    }
+
+    /// <summary>
+    /// Resolves cross-file edges by looking up target symbols in the database.
+    /// Edges with qualified name strings as targets are resolved to actual symbol IDs.
+    /// Returns a tuple of (resolved edges, count of resolved edges).
+    /// </summary>
+    private async Task<(List<SymbolEdge> edges, int resolvedCount)> ResolveCrossFileEdgesAsync(
+        Npgsql.NpgsqlConnection connection,
+        Npgsql.NpgsqlTransaction transaction,
+        List<SymbolEdge> edges,
+        List<Symbol> currentBatchSymbols,
+        CancellationToken cancellationToken)
+    {
+        var resolvedEdges = new List<SymbolEdge>();
+        var resolvedCount = 0;
+
+        // Build a lookup of symbols from the current batch
+        // We use normalized qualified names to match generic methods with concrete type arguments
+        // Note: Multiple symbols can have the same qualified name (e.g., namespaces in different files)
+        // We group by qualified name and take the first symbol ID for each
+        var currentBatchLookup = currentBatchSymbols
+            .Where(s => !string.IsNullOrEmpty(s.QualifiedName))
+            .GroupBy(s => NormalizeQualifiedName(s.QualifiedName!))
+            .ToDictionary(g => g.Key, g => g.First().Id);
+
+        // Also query existing symbols from the database for cross-file resolution
+        var repositoryName = edges.FirstOrDefault()?.RepositoryName;
+        var branchName = edges.FirstOrDefault()?.BranchName;
+
+        Dictionary<string, string> databaseLookup = new();
+        if (!string.IsNullOrEmpty(repositoryName) && !string.IsNullOrEmpty(branchName))
+        {
+            var sql = @"
+                SELECT id, qualified_name
+                FROM symbols
+                WHERE repo_id = @RepoId
+                  AND branch_name = @BranchName
+                  AND qualified_name IS NOT NULL";
+
+            var command = new Dapper.CommandDefinition(
+                sql,
+                new { RepoId = repositoryName, BranchName = branchName },
+                transaction,
+                cancellationToken: cancellationToken);
+
+            var dbSymbols = await connection.QueryAsync<(string id, string qualified_name)>(command);
+            // Note: Multiple symbols can have the same qualified name (e.g., namespaces in different files)
+            // We group by qualified name and take the first symbol ID for each
+            databaseLookup = dbSymbols
+                .GroupBy(s => NormalizeQualifiedName(s.qualified_name))
+                .ToDictionary(g => g.Key, g => g.First().id);
+        }
+
+        foreach (var edge in edges)
+        {
+            var targetId = edge.TargetSymbolId;
+            var wasResolved = false;
+
+            // Check if target is a GUID (already resolved)
+            if (!Guid.TryParse(targetId, out _))
+            {
+                // Target is a qualified name string, try to resolve it
+                var normalizedTarget = NormalizeQualifiedName(targetId);
+
+                // First check current batch
+                if (currentBatchLookup.TryGetValue(normalizedTarget, out var resolvedId))
+                {
+                    targetId = resolvedId;
+                    wasResolved = true;
+                    _logger.LogDebug("Resolved edge target '{OriginalTarget}' -> '{NormalizedTarget}' to symbol ID {SymbolId} (current batch)",
+                        edge.TargetSymbolId, normalizedTarget, resolvedId);
+                }
+                // Then check database
+                else if (databaseLookup.TryGetValue(normalizedTarget, out resolvedId))
+                {
+                    targetId = resolvedId;
+                    wasResolved = true;
+                    _logger.LogDebug("Resolved edge target '{OriginalTarget}' -> '{NormalizedTarget}' to symbol ID {SymbolId} (database)",
+                        edge.TargetSymbolId, normalizedTarget, resolvedId);
+                }
+                // If still not resolved, skip this edge (external reference)
+                else
+                {
+                    _logger.LogDebug("Could not resolve edge target '{OriginalTarget}' -> '{NormalizedTarget}' (external reference or missing symbol)",
+                        edge.TargetSymbolId, normalizedTarget);
+                    // Skip edges to external symbols (framework types, etc.)
+                    continue;
+                }
+            }
+
+            if (wasResolved)
+            {
+                resolvedCount++;
+            }
+
+            resolvedEdges.Add(new SymbolEdge
+            {
+                Id = edge.Id,
+                SourceSymbolId = edge.SourceSymbolId,
+                TargetSymbolId = targetId,
+                Kind = edge.Kind,
+                RepositoryName = edge.RepositoryName,
+                BranchName = edge.BranchName,
+                CommitSha = edge.CommitSha,
+                IndexedAt = edge.IndexedAt
+            });
+        }
+
+        return (resolvedEdges, resolvedCount);
+    }
+
+    /// <summary>
+    /// Finds the compilation for a file by matching it to a project in the workspace.
+    /// </summary>
+    private Microsoft.CodeAnalysis.Compilation? FindCompilationForFile(WorkspaceCache workspaceCache, string filePath)
+    {
+        // Combine the repository path with the relative file path to get the absolute path
+        var absoluteFilePath = Path.IsPathRooted(filePath)
+            ? filePath
+            : Path.Combine(workspaceCache.RepositoryPath, filePath);
+        var normalizedFilePath = Path.GetFullPath(absoluteFilePath);
+
+        // Try to find a project that contains this file
+        foreach (var projectCache in workspaceCache.Projects.Values)
+        {
+            var project = projectCache.Project;
+
+            // Check if any document in the project matches this file path
+            foreach (var document in project.Documents)
+            {
+                if (document.FilePath != null)
+                {
+                    var normalizedDocPath = Path.GetFullPath(document.FilePath);
+                    if (normalizedDocPath.Equals(normalizedFilePath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _logger.LogDebug(
+                            "Found compilation for {FilePath} in project {ProjectName}",
+                            filePath,
+                            project.Name);
+                        return projectCache.Compilation;
+                    }
+                }
+            }
+        }
+
+        // If no exact match, try to find a project by directory proximity
+        foreach (var projectCache in workspaceCache.Projects.Values)
+        {
+            var project = projectCache.Project;
+            if (project.FilePath != null)
+            {
+                var projectDir = Path.GetDirectoryName(project.FilePath);
+                if (projectDir != null && normalizedFilePath.StartsWith(projectDir, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogDebug(
+                        "Using compilation from nearby project {ProjectName} for {FilePath}",
+                        project.Name,
+                        filePath);
+                    return projectCache.Compilation;
+                }
+            }
+        }
+
+        // Fallback: use the first available compilation
+        if (workspaceCache.Projects.Count > 0)
+        {
+            var firstProject = workspaceCache.Projects.Values.First();
+            _logger.LogDebug(
+                "Using first available compilation from project {ProjectName} for {FilePath}",
+                firstProject.Project.Name,
+                filePath);
+            return firstProject.Compilation;
+        }
+
+        return null;
+    }
 }
 
-/// <summary>
-/// Result of an indexing operation.
-/// </summary>
 public sealed class IndexingResult
 {
     /// <summary>

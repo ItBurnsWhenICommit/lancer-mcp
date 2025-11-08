@@ -19,6 +19,7 @@ public sealed class GitTrackerService : IDisposable
     private readonly IOptionsMonitor<ServerOptions> _options;
     private readonly IRepositoryRepository _repositoryRepository;
     private readonly IBranchRepository _branchRepository;
+    private readonly WorkspaceLoader _workspaceLoader;
     private readonly ConcurrentDictionary<string, RepositoryState> _repositories = new();
     private readonly SemaphoreSlim _updateLock = new(1, 1);
     private bool _disposed;
@@ -27,12 +28,14 @@ public sealed class GitTrackerService : IDisposable
         ILogger<GitTrackerService> logger,
         IOptionsMonitor<ServerOptions> options,
         IRepositoryRepository repositoryRepository,
-        IBranchRepository branchRepository)
+        IBranchRepository branchRepository,
+        WorkspaceLoader workspaceLoader)
     {
         _logger = logger;
         _options = options;
         _repositoryRepository = repositoryRepository;
         _branchRepository = branchRepository;
+        _workspaceLoader = workspaceLoader;
     }
 
     /// <summary>
@@ -124,8 +127,8 @@ public sealed class GitTrackerService : IDisposable
 
                 var cloneOptions = new CloneOptions
                 {
-                    IsBare = true, // Use bare repository to save space
-                    Checkout = false,
+                    IsBare = false, // Use working tree so MSBuildWorkspace can find .sln/.csproj files
+                    Checkout = true,
                     RecurseSubmodules = false
                 };
 
@@ -190,6 +193,9 @@ public sealed class GitTrackerService : IDisposable
         };
 
         await Task.Run(() => Commands.Fetch(repo, remote.Name, refSpecs, fetchOptions, null), cancellationToken);
+
+        // Clear workspace cache after fetching updates so the next indexing will reload the workspace
+        _workspaceLoader.ClearCache(repoState.LocalPath);
 
         // Find the branch
         var remoteBranchName = $"origin/{branchName}";

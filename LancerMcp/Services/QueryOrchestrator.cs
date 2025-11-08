@@ -345,6 +345,9 @@ public sealed class QueryOrchestrator
         var results = new List<SearchResult>();
         var seenSymbolIds = new HashSet<string>(); // Track seen symbols to avoid duplicates
 
+        // Detect query direction: "what calls X" vs "what does X call"
+        var isIncomingQuery = DetectIncomingRelationQuery(parsedQuery.OriginalQuery);
+
         // First, find the symbols mentioned in the query
         if (parsedQuery.SymbolNames?.Any() == true)
         {
@@ -397,36 +400,121 @@ public sealed class QueryOrchestrator
                                 Id = sourceSymbol.Id,
                                 Name = sourceSymbol.Name,
                                 Kind = sourceSymbol.Kind,
-                                RelationType = $"referenced_by_{edge.Kind}",
+                                RelationType = $"CalledBy_{edge.Kind}",
                                 FilePath = sourceSymbol.FilePath,
                                 Line = sourceSymbol.StartLine
                             });
                         }
                     }
 
-                    results.Add(new SearchResult
+                    // If this is an incoming query (what calls X), promote callers to primary results
+                    if (isIncomingQuery && incomingEdges.Any())
                     {
-                        Id = symbol.Id,
-                        Type = "symbol_with_relations",
-                        Repository = symbol.RepositoryName,
-                        Branch = symbol.BranchName,
-                        FilePath = symbol.FilePath,
-                        Language = symbol.Language,
-                        SymbolName = symbol.Name,
-                        SymbolKind = symbol.Kind,
-                        Content = symbol.Signature ?? $"{symbol.Kind} {symbol.Name}",
-                        StartLine = symbol.StartLine,
-                        EndLine = symbol.EndLine,
-                        Score = 1.0f,
-                        Signature = symbol.Signature,
-                        Documentation = symbol.Documentation,
-                        RelatedSymbols = relatedSymbols
-                    });
+                        // Add the target symbol first as context
+                        results.Add(new SearchResult
+                        {
+                            Id = symbol.Id,
+                            Type = "symbol_with_relations",
+                            Repository = symbol.RepositoryName,
+                            Branch = symbol.BranchName,
+                            FilePath = symbol.FilePath,
+                            Language = symbol.Language,
+                            SymbolName = symbol.Name,
+                            SymbolKind = symbol.Kind,
+                            Content = symbol.Signature ?? $"{symbol.Kind} {symbol.Name}",
+                            StartLine = symbol.StartLine,
+                            EndLine = symbol.EndLine,
+                            Score = 1.0f,
+                            Signature = symbol.Signature,
+                            Documentation = symbol.Documentation,
+                            RelatedSymbols = relatedSymbols
+                        });
+
+                        // Then add each caller as a primary result
+                        foreach (var edge in incomingEdges.Take(20))
+                        {
+                            var sourceSymbol = await _symbolRepository.GetByIdAsync(edge.SourceSymbolId, cancellationToken);
+                            if (sourceSymbol != null && seenSymbolIds.Add(sourceSymbol.Id))
+                            {
+                                results.Add(new SearchResult
+                                {
+                                    Id = sourceSymbol.Id,
+                                    Type = "caller",
+                                    Repository = sourceSymbol.RepositoryName,
+                                    Branch = sourceSymbol.BranchName,
+                                    FilePath = sourceSymbol.FilePath,
+                                    Language = sourceSymbol.Language,
+                                    SymbolName = sourceSymbol.Name,
+                                    SymbolKind = sourceSymbol.Kind,
+                                    Content = sourceSymbol.Signature ?? $"{sourceSymbol.Kind} {sourceSymbol.Name}",
+                                    StartLine = sourceSymbol.StartLine,
+                                    EndLine = sourceSymbol.EndLine,
+                                    Score = 0.9f,
+                                    Signature = sourceSymbol.Signature,
+                                    Documentation = sourceSymbol.Documentation,
+                                    RelatedSymbols = new List<RelatedSymbol>
+                                    {
+                                        new RelatedSymbol
+                                        {
+                                            Id = symbol.Id,
+                                            Name = symbol.Name,
+                                            Kind = symbol.Kind,
+                                            RelationType = edge.Kind.ToString(),
+                                            FilePath = symbol.FilePath,
+                                            Line = symbol.StartLine
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // Default behavior: return the symbol with its relationships
+                        results.Add(new SearchResult
+                        {
+                            Id = symbol.Id,
+                            Type = "symbol_with_relations",
+                            Repository = symbol.RepositoryName,
+                            Branch = symbol.BranchName,
+                            FilePath = symbol.FilePath,
+                            Language = symbol.Language,
+                            SymbolName = symbol.Name,
+                            SymbolKind = symbol.Kind,
+                            Content = symbol.Signature ?? $"{symbol.Kind} {symbol.Name}",
+                            StartLine = symbol.StartLine,
+                            EndLine = symbol.EndLine,
+                            Score = 1.0f,
+                            Signature = symbol.Signature,
+                            Documentation = symbol.Documentation,
+                            RelatedSymbols = relatedSymbols
+                        });
+                    }
                 }
             }
         }
 
         return results;
+    }
+
+    /// <summary>
+    /// Detect if the query is asking for incoming relationships (what calls/uses X).
+    /// </summary>
+    private bool DetectIncomingRelationQuery(string query)
+    {
+        var lowerQuery = query.ToLowerInvariant();
+
+        // Patterns that indicate incoming relationships (what calls/uses/references this)
+        var incomingPatterns = new[]
+        {
+            @"\bwhat\s+(calls?|uses?|references?|depends?\s+on)\b",
+            @"\b(callers?|usages?|references?)\s+of\b",
+            @"\bwho\s+(calls?|uses?|references?)\b",
+            @"\bfind\s+(callers?|usages?|references?)\b",
+            @"\bshow\s+(callers?|usages?|references?)\b"
+        };
+
+        return incomingPatterns.Any(pattern => Regex.IsMatch(lowerQuery, pattern));
     }
 
     /// <summary>
