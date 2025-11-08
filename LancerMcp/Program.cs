@@ -71,6 +71,8 @@ builder.Services.AddSingleton<BasicParserService>();
 builder.Services.AddSingleton<ChunkingService>();
 builder.Services.AddSingleton<QueryOrchestrator>();
 builder.Services.AddSingleton<WorkspaceLoader>();
+builder.Services.AddSingleton<PersistenceService>();
+builder.Services.AddSingleton<EdgeResolutionService>();
 
 // Configure HttpClient for EmbeddingService with proper BaseAddress and Timeout
 builder.Services.AddHttpClient<EmbeddingService>((serviceProvider, client) =>

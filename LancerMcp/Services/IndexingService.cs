@@ -1,9 +1,6 @@
-using Dapper;
-using Pgvector;
 using Microsoft.Extensions.Options;
 using LancerMcp.Configuration;
 using LancerMcp.Models;
-using LancerMcp.Repositories;
 using System.Collections.Concurrent;
 
 namespace LancerMcp.Services;
@@ -23,13 +20,8 @@ public sealed class IndexingService
     private readonly ChunkingService _chunkingService;
     private readonly EmbeddingService _embeddingService;
     private readonly WorkspaceLoader _workspaceLoader;
-    private readonly IRepositoryRepository _repositoryRepository;
-    private readonly ICommitRepository _commitRepository;
-    private readonly IFileRepository _fileRepository;
-    private readonly ISymbolRepository _symbolRepository;
-    private readonly IEdgeRepository _edgeRepository;
-    private readonly ICodeChunkRepository _chunkRepository;
-    private readonly IEmbeddingRepository _embeddingRepository;
+    private readonly PersistenceService _persistenceService;
+    private readonly EdgeResolutionService _edgeResolutionService;
     private readonly SemaphoreSlim _concurrencyLimiter;
 
     // Static lock dictionary to prevent concurrent workspace checkouts across IndexingService instances
@@ -47,13 +39,8 @@ public sealed class IndexingService
         ChunkingService chunkingService,
         EmbeddingService embeddingService,
         WorkspaceLoader workspaceLoader,
-        IRepositoryRepository repositoryRepository,
-        ICommitRepository commitRepository,
-        IFileRepository fileRepository,
-        ISymbolRepository symbolRepository,
-        IEdgeRepository edgeRepository,
-        ICodeChunkRepository chunkRepository,
-        IEmbeddingRepository embeddingRepository)
+        PersistenceService persistenceService,
+        EdgeResolutionService edgeResolutionService)
     {
         _logger = logger;
         _options = options;
@@ -65,13 +52,8 @@ public sealed class IndexingService
         _chunkingService = chunkingService;
         _embeddingService = embeddingService;
         _workspaceLoader = workspaceLoader;
-        _repositoryRepository = repositoryRepository;
-        _commitRepository = commitRepository;
-        _fileRepository = fileRepository;
-        _symbolRepository = symbolRepository;
-        _edgeRepository = edgeRepository;
-        _chunkRepository = chunkRepository;
-        _embeddingRepository = embeddingRepository;
+        _persistenceService = persistenceService;
+        _edgeResolutionService = edgeResolutionService;
 
         var concurrency = options.CurrentValue.FileReadConcurrency;
         _concurrencyLimiter = new SemaphoreSlim(concurrency, concurrency);
@@ -144,7 +126,7 @@ public sealed class IndexingService
                 {
                     try
                     {
-                        await DeleteFileDataAsync(fileChange.RepositoryName, fileChange.BranchName, fileChange.FilePath, cancellationToken);
+                        await _persistenceService.DeleteFileDataAsync(fileChange.RepositoryName, fileChange.BranchName, fileChange.FilePath, cancellationToken);
                         result.DeletedFiles.Add(fileChange.FilePath);
                         _logger.LogInformation("Deleted indexed data for removed file: {FilePath}", fileChange.FilePath);
                     }
@@ -324,13 +306,6 @@ public sealed class IndexingService
     {
         _logger.LogInformation("Persisting {Count} files to storage (transactional)...", parsedFiles.Count);
 
-        // Step 0: Ensure repositories exist in the database (outside transaction)
-        var repositoryNames = parsedFiles.Select(f => f.RepositoryName).Distinct().ToList();
-        foreach (var repoName in repositoryNames)
-        {
-            await EnsureRepositoryExistsAsync(repoName, cancellationToken);
-        }
-
         // Step 1: Chunk files (CPU-heavy, do BEFORE transaction)
         _logger.LogInformation("Chunking {Count} files...", parsedFiles.Count);
         var allChunks = new List<CodeChunk>();
@@ -364,7 +339,7 @@ public sealed class IndexingService
 
             foreach (var file in filesToDelete)
             {
-                await DeleteFileDataAsync(file.RepositoryName, file.BranchName, file.FilePath, cancellationToken, connection, transaction);
+                await _persistenceService.DeleteFileDataAsync(file.RepositoryName, file.BranchName, file.FilePath, cancellationToken, connection, transaction);
             }
 
             // Step 3b: Persist commits
@@ -397,7 +372,7 @@ public sealed class IndexingService
 
             if (commits.Any())
             {
-                await CreateCommitsBatchTransactionalAsync(connection, transaction, commits, cancellationToken);
+                await _persistenceService.CreateCommitsBatchAsync(connection, transaction, commits, cancellationToken);
                 _logger.LogInformation("Persisted {Count} commits", commits.Count);
             }
 
@@ -417,7 +392,7 @@ public sealed class IndexingService
 
             if (files.Any())
             {
-                await CreateFilesBatchTransactionalAsync(connection, transaction, files, cancellationToken);
+                await _persistenceService.CreateFilesBatchAsync(connection, transaction, files, cancellationToken);
                 _logger.LogInformation("Persisted {Count} files", files.Count);
             }
 
@@ -425,7 +400,7 @@ public sealed class IndexingService
             var allSymbols = parsedFiles.SelectMany(f => f.Symbols).ToList();
             if (allSymbols.Any())
             {
-                await CreateSymbolsBatchTransactionalAsync(connection, transaction, allSymbols, cancellationToken);
+                await _persistenceService.CreateSymbolsBatchAsync(connection, transaction, allSymbols, cancellationToken);
                 _logger.LogInformation("Persisted {Count} symbols", allSymbols.Count);
             }
 
@@ -434,24 +409,24 @@ public sealed class IndexingService
             if (allEdges.Any())
             {
                 _logger.LogInformation("Resolving cross-file edges for {Count} edges...", allEdges.Count);
-                var (resolvedEdges, resolvedCount) = await ResolveCrossFileEdgesAsync(connection, transaction, allEdges, allSymbols, cancellationToken);
+                var (resolvedEdges, resolvedCount) = await _edgeResolutionService.ResolveCrossFileEdgesAsync(connection, transaction, allEdges, allSymbols, cancellationToken);
                 _logger.LogInformation("Resolved {ResolvedCount} cross-file edges out of {TotalCount}", resolvedCount, allEdges.Count);
 
-                await CreateEdgesBatchTransactionalAsync(connection, transaction, resolvedEdges, cancellationToken);
+                await _persistenceService.CreateEdgesBatchAsync(connection, transaction, resolvedEdges, cancellationToken);
                 _logger.LogInformation("Persisted {Count} edges", resolvedEdges.Count);
             }
 
             // Step 3f: Persist chunks
             if (allChunks.Any())
             {
-                await CreateChunksBatchTransactionalAsync(connection, transaction, allChunks, cancellationToken);
+                await _persistenceService.CreateChunksBatchAsync(connection, transaction, allChunks, cancellationToken);
                 _logger.LogInformation("Persisted {Count} chunks", allChunks.Count);
             }
 
             // Step 3g: Persist embeddings
             if (embeddings.Any())
             {
-                await CreateEmbeddingsBatchTransactionalAsync(connection, transaction, embeddings, cancellationToken);
+                await _persistenceService.CreateEmbeddingsBatchAsync(connection, transaction, embeddings, cancellationToken);
                 _logger.LogInformation("Persisted {Count} embeddings", embeddings.Count);
             }
 
@@ -466,454 +441,6 @@ public sealed class IndexingService
             await transaction.RollbackAsync(cancellationToken);
             throw;
         }
-    }
-
-    /// <summary>
-    /// Ensures a repository exists in the database, creating it if necessary.
-    /// </summary>
-    private async Task EnsureRepositoryExistsAsync(string repositoryName, CancellationToken cancellationToken)
-    {
-        // Check if repository already exists
-        var existingRepo = await _repositoryRepository.GetByNameAsync(repositoryName, cancellationToken);
-        if (existingRepo != null)
-        {
-            return; // Repository already exists
-        }
-
-        // Get repository configuration from options
-        var repoConfig = _options.CurrentValue.Repositories
-            .FirstOrDefault(r => r.Name == repositoryName);
-
-        if (repoConfig == null)
-        {
-            _logger.LogWarning("Repository {Name} not found in configuration, creating with minimal info", repositoryName);
-            repoConfig = new ServerOptions.RepositoryDescriptor
-            {
-                Name = repositoryName,
-                RemoteUrl = "unknown",
-                DefaultBranch = "main"
-            };
-        }
-
-        // Create repository record
-        var repository = new Repository
-        {
-            Id = repositoryName, // Use repository name as ID for consistency
-            Name = repositoryName,
-            RemoteUrl = repoConfig.RemoteUrl,
-            DefaultBranch = repoConfig.DefaultBranch,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
-        };
-
-        await _repositoryRepository.CreateAsync(repository, cancellationToken);
-        _logger.LogInformation("Created repository record for {Name}", repositoryName);
-    }
-
-    /// <summary>
-    /// Deletes all indexed data (symbols, edges, chunks, embeddings, file metadata) for a specific file.
-    /// This prevents duplicate data when re-indexing the same file and cleans up deleted files.
-    /// </summary>
-    /// <param name="connection">Optional database connection for transactional operations.</param>
-    /// <param name="transaction">Optional database transaction for transactional operations.</param>
-    private async Task DeleteFileDataAsync(
-        string repositoryName,
-        string branchName,
-        string filePath,
-        CancellationToken cancellationToken,
-        Npgsql.NpgsqlConnection? connection = null,
-        Npgsql.NpgsqlTransaction? transaction = null)
-    {
-        _logger.LogDebug("Deleting old data for file {FilePath} in {Repo}/{Branch}", filePath, repositoryName, branchName);
-
-        // If connection and transaction are provided, use raw SQL for transactional operations
-        if (connection != null && transaction != null)
-        {
-            var param = new { RepoId = repositoryName, BranchName = branchName, FilePath = filePath };
-
-            // Delete symbols (cascading deletes handle edges)
-            const string deleteSymbolsSql = "DELETE FROM symbols WHERE repo_id = @RepoId AND branch_name = @BranchName AND file_path = @FilePath";
-            var deleteSymbolsCmd = new CommandDefinition(deleteSymbolsSql, param, transaction, cancellationToken: cancellationToken);
-            await connection.ExecuteAsync(deleteSymbolsCmd);
-
-            // Delete chunks (cascading deletes handle embeddings)
-            const string deleteChunksSql = "DELETE FROM code_chunks WHERE repo_id = @RepoId AND branch_name = @BranchName AND file_path = @FilePath";
-            var deleteChunksCmd = new CommandDefinition(deleteChunksSql, param, transaction, cancellationToken: cancellationToken);
-            await connection.ExecuteAsync(deleteChunksCmd);
-
-            // Delete file metadata
-            const string deleteFileSql = "DELETE FROM files WHERE repo_id = @RepoId AND branch_name = @BranchName AND file_path = @FilePath";
-            var deleteFileCmd = new CommandDefinition(deleteFileSql, param, transaction, cancellationToken: cancellationToken);
-            await connection.ExecuteAsync(deleteFileCmd);
-        }
-        else
-        {
-            // Use repository methods for non-transactional operations
-            // Delete symbols for this file (cascading deletes will handle edges via foreign keys)
-            await _symbolRepository.DeleteByFileAsync(repositoryName, branchName, filePath, cancellationToken);
-
-            // Delete code chunks for this file (cascading deletes will handle embeddings via foreign keys)
-            await _chunkRepository.DeleteByFileAsync(repositoryName, branchName, filePath, cancellationToken);
-
-            // Delete file metadata
-            await _fileRepository.DeleteByFilePathAsync(repositoryName, branchName, filePath, cancellationToken);
-        }
-    }
-
-    // ===== Transactional Helper Methods =====
-    // These methods execute database operations within a transaction to ensure atomicity.
-
-    private async Task CreateCommitsBatchTransactionalAsync(
-        Npgsql.NpgsqlConnection connection,
-        Npgsql.NpgsqlTransaction transaction,
-        List<Commit> commits,
-        CancellationToken cancellationToken)
-    {
-        const string sql = @"
-            INSERT INTO commits (id, repo_id, sha, branch_name, author_name, author_email,
-                                 commit_message, committed_at, indexed_at)
-            VALUES (@Id, @RepoId, @Sha, @BranchName, @AuthorName, @AuthorEmail,
-                    @CommitMessage, @CommittedAt, @IndexedAt)
-            ON CONFLICT (repo_id, sha, branch_name) DO NOTHING";
-
-        var command = new CommandDefinition(sql, commits, transaction, cancellationToken: cancellationToken);
-        await connection.ExecuteAsync(command);
-    }
-
-    private async Task CreateFilesBatchTransactionalAsync(
-        Npgsql.NpgsqlConnection connection,
-        Npgsql.NpgsqlTransaction transaction,
-        List<FileMetadata> files,
-        CancellationToken cancellationToken)
-    {
-        const string sql = @"
-            INSERT INTO files (id, repo_id, branch_name, commit_sha, file_path, language,
-                               size_bytes, line_count, indexed_at)
-            VALUES (@Id, @RepoId, @BranchName, @CommitSha, @FilePath, @Language::language,
-                    @SizeBytes, @LineCount, @IndexedAt)
-            ON CONFLICT (repo_id, branch_name, commit_sha, file_path) DO UPDATE
-            SET language = EXCLUDED.language,
-                size_bytes = EXCLUDED.size_bytes,
-                line_count = EXCLUDED.line_count,
-                indexed_at = EXCLUDED.indexed_at";
-
-        var filesList = files.Select(f => new
-        {
-            f.Id,
-            f.RepoId,
-            f.BranchName,
-            f.CommitSha,
-            f.FilePath,
-            Language = f.Language.ToString(),
-            f.SizeBytes,
-            f.LineCount,
-            f.IndexedAt
-        }).ToList();
-
-        var command = new CommandDefinition(sql, filesList, transaction, cancellationToken: cancellationToken);
-        await connection.ExecuteAsync(command);
-    }
-
-    private async Task CreateSymbolsBatchTransactionalAsync(
-        Npgsql.NpgsqlConnection connection,
-        Npgsql.NpgsqlTransaction transaction,
-        List<Symbol> symbols,
-        CancellationToken cancellationToken)
-    {
-        const string sql = @"
-            INSERT INTO symbols (id, repo_id, branch_name, commit_sha, file_path, name, qualified_name,
-                                 kind, language, start_line, start_column, end_line, end_column,
-                                 signature, documentation, modifiers, parent_symbol_id, indexed_at)
-            VALUES (@Id, @RepositoryName, @BranchName, @CommitSha, @FilePath, @Name, @QualifiedName,
-                    @Kind::symbol_kind, @Language::language, @StartLine, @StartColumn, @EndLine, @EndColumn,
-                    @Signature, @Documentation, @Modifiers, @ParentSymbolId, @IndexedAt)
-            ON CONFLICT (repo_id, branch_name, file_path, name, start_line, end_line) DO NOTHING";
-
-        var symbolsList = symbols.Select(s => new
-        {
-            s.Id,
-            s.RepositoryName,
-            s.BranchName,
-            s.CommitSha,
-            s.FilePath,
-            s.Name,
-            s.QualifiedName,
-            Kind = s.Kind.ToString(),
-            Language = s.Language.ToString(),
-            s.StartLine,
-            s.StartColumn,
-            s.EndLine,
-            s.EndColumn,
-            s.Signature,
-            s.Documentation,
-            s.Modifiers,
-            s.ParentSymbolId,
-            s.IndexedAt
-        }).ToList();
-
-        var command = new CommandDefinition(sql, symbolsList, transaction, cancellationToken: cancellationToken);
-        await connection.ExecuteAsync(command);
-    }
-
-    private async Task CreateEdgesBatchTransactionalAsync(
-        Npgsql.NpgsqlConnection connection,
-        Npgsql.NpgsqlTransaction transaction,
-        List<SymbolEdge> edges,
-        CancellationToken cancellationToken)
-    {
-        const string sql = @"
-            INSERT INTO edges (id, source_symbol_id, target_symbol_id, kind, repo_id, branch_name,
-                               commit_sha, indexed_at)
-            VALUES (@Id, @SourceSymbolId, @TargetSymbolId, @Kind::edge_kind, @RepositoryName,
-                    @BranchName, @CommitSha, @IndexedAt)";
-
-        var edgesList = edges.Select(e => new
-        {
-            e.Id,
-            e.SourceSymbolId,
-            e.TargetSymbolId,
-            Kind = e.Kind.ToString(),
-            e.RepositoryName,
-            e.BranchName,
-            e.CommitSha,
-            e.IndexedAt
-        }).ToList();
-
-        var command = new CommandDefinition(sql, edgesList, transaction, cancellationToken: cancellationToken);
-        await connection.ExecuteAsync(command);
-    }
-
-    private async Task CreateChunksBatchTransactionalAsync(
-        Npgsql.NpgsqlConnection connection,
-        Npgsql.NpgsqlTransaction transaction,
-        List<CodeChunk> chunks,
-        CancellationToken cancellationToken)
-    {
-        const string sql = @"
-            INSERT INTO code_chunks (id, repo_id, branch_name, commit_sha, file_path, symbol_id,
-                                     symbol_name, symbol_kind, language, content, start_line, end_line,
-                                     chunk_start_line, chunk_end_line, token_count, parent_symbol_name,
-                                     signature, documentation, created_at)
-            VALUES (@Id, @RepositoryName, @BranchName, @CommitSha, @FilePath, @SymbolId,
-                    @SymbolName, @SymbolKind::symbol_kind, @Language::language, @Content, @StartLine, @EndLine,
-                    @ChunkStartLine, @ChunkEndLine, @TokenCount, @ParentSymbolName,
-                    @Signature, @Documentation, @CreatedAt)
-            ON CONFLICT (repo_id, branch_name, file_path, chunk_start_line, chunk_end_line) DO NOTHING";
-
-        var chunksList = chunks.Select(c => new
-        {
-            c.Id,
-            c.RepositoryName,
-            c.BranchName,
-            c.CommitSha,
-            c.FilePath,
-            c.SymbolId,
-            c.SymbolName,
-            SymbolKind = c.SymbolKind?.ToString(),
-            Language = c.Language.ToString(),
-            c.Content,
-            c.StartLine,
-            c.EndLine,
-            c.ChunkStartLine,
-            c.ChunkEndLine,
-            c.TokenCount,
-            c.ParentSymbolName,
-            c.Signature,
-            c.Documentation,
-            c.CreatedAt
-        }).ToList();
-
-        var command = new CommandDefinition(sql, chunksList, transaction, cancellationToken: cancellationToken);
-        await connection.ExecuteAsync(command);
-    }
-
-    private async Task CreateEmbeddingsBatchTransactionalAsync(
-        Npgsql.NpgsqlConnection connection,
-        Npgsql.NpgsqlTransaction transaction,
-        List<Embedding> embeddings,
-        CancellationToken cancellationToken)
-    {
-        const string sql = @"
-            INSERT INTO embeddings (id, chunk_id, repo_id, branch_name, commit_sha, vector,
-                                    model, model_version, generated_at)
-            VALUES (@Id, @ChunkId, @RepositoryName, @BranchName, @CommitSha, @Vector::vector,
-                    @Model, @ModelVersion, @GeneratedAt)
-            ON CONFLICT (chunk_id) DO UPDATE
-            SET vector = EXCLUDED.vector,
-                model = EXCLUDED.model,
-                model_version = EXCLUDED.model_version,
-                generated_at = EXCLUDED.generated_at";
-
-        var embeddingsList = embeddings.Select(e => new
-        {
-            e.Id,
-            e.ChunkId,
-            e.RepositoryName,
-            e.BranchName,
-            e.CommitSha,
-            Vector = new Vector(e.Vector).ToString(),
-            e.Model,
-            e.ModelVersion,
-            e.GeneratedAt
-        }).ToList();
-
-        var command = new CommandDefinition(sql, embeddingsList, transaction, cancellationToken: cancellationToken);
-        await connection.ExecuteAsync(command);
-    }
-
-    /// <summary>
-    /// Normalizes a qualified name for matching by:
-    /// 1. Removing generic type arguments (e.g., "Method<int>" -> "Method<>")
-    /// 2. Removing parameter lists (e.g., "Method(int, string)" -> "Method")
-    /// 3. Extracting the class.method portion (e.g., "Namespace.Class.Method" -> "Class.Method")
-    /// This allows matching partial qualified names from fallback parsing to full qualified names.
-    /// </summary>
-    private string NormalizeQualifiedName(string qualifiedName)
-    {
-        // Step 1: Replace generic type arguments with empty brackets
-        // E.g., "QueryAsync<CodeChunk>" -> "QueryAsync<>"
-        var normalized = System.Text.RegularExpressions.Regex.Replace(
-            qualifiedName,
-            @"<[^>]+>",
-            "<>");
-
-        // Step 2: Remove parameter lists
-        // E.g., "QueryAsync<>(string, object?, CancellationToken)" -> "QueryAsync<>"
-        var parenIndex = normalized.IndexOf('(');
-        if (parenIndex >= 0)
-        {
-            normalized = normalized.Substring(0, parenIndex);
-        }
-
-        // Step 3: Extract the last two parts (Class.Method)
-        // E.g., "LancerMcp.Services.DatabaseService.QueryAsync<>" -> "DatabaseService.QueryAsync<>"
-        // This allows matching "DatabaseService.QueryAsync" from fallback to full qualified names
-        var parts = normalized.Split('.');
-        if (parts.Length >= 2)
-        {
-            normalized = string.Join(".", parts.Skip(parts.Length - 2));
-        }
-
-        return normalized;
-    }
-
-    /// <summary>
-    /// Resolves cross-file edges by looking up target symbols in the database.
-    /// Edges with qualified name strings as targets are resolved to actual symbol IDs.
-    /// Returns a tuple of (resolved edges, count of resolved edges).
-    /// </summary>
-    private async Task<(List<SymbolEdge> edges, int resolvedCount)> ResolveCrossFileEdgesAsync(
-        Npgsql.NpgsqlConnection connection,
-        Npgsql.NpgsqlTransaction transaction,
-        List<SymbolEdge> edges,
-        List<Symbol> currentBatchSymbols,
-        CancellationToken cancellationToken)
-    {
-        var resolvedEdges = new List<SymbolEdge>();
-        var resolvedCount = 0;
-
-        // Build a lookup of symbols from the current batch
-        // We use normalized qualified names to match generic methods with concrete type arguments
-        // Note: Multiple symbols can have the same qualified name (e.g., namespaces in different files)
-        // We group by qualified name and take the first symbol ID for each
-        var currentBatchLookup = currentBatchSymbols
-            .Where(s => !string.IsNullOrEmpty(s.QualifiedName))
-            .GroupBy(s => NormalizeQualifiedName(s.QualifiedName!))
-            .ToDictionary(g => g.Key, g => g.First().Id);
-
-        // Collect all target qualified names that need to be resolved from the database
-        // Only query for symbols we actually need, not all symbols in the repository
-        var targetQualifiedNames = edges
-            .Where(e => !string.IsNullOrEmpty(e.TargetSymbolId) && !currentBatchLookup.ContainsKey(e.TargetSymbolId!))
-            .Select(e => e.TargetSymbolId!)
-            .Distinct()
-            .ToList();
-
-        var repositoryName = edges.FirstOrDefault()?.RepositoryName;
-        var branchName = edges.FirstOrDefault()?.BranchName;
-
-        Dictionary<string, string> databaseLookup = new();
-        if (!string.IsNullOrEmpty(repositoryName) && !string.IsNullOrEmpty(branchName) && targetQualifiedNames.Any())
-        {
-            // Optimize: Only query for the specific qualified names we need
-            // This changes from O(n²) to O(n) by using indexed lookup
-            var sql = @"
-                SELECT id, qualified_name
-                FROM symbols
-                WHERE repo_id = @RepoId
-                  AND branch_name = @BranchName
-                  AND qualified_name = ANY(@QualifiedNames)";
-
-            var command = new Dapper.CommandDefinition(
-                sql,
-                new { RepoId = repositoryName, BranchName = branchName, QualifiedNames = targetQualifiedNames.ToArray() },
-                transaction,
-                cancellationToken: cancellationToken);
-
-            var dbSymbols = await connection.QueryAsync<(string id, string qualified_name)>(command);
-            // Note: Multiple symbols can have the same qualified name (e.g., namespaces in different files)
-            // We group by qualified name and take the first symbol ID for each
-            databaseLookup = dbSymbols
-                .GroupBy(s => NormalizeQualifiedName(s.qualified_name))
-                .ToDictionary(g => g.Key, g => g.First().id);
-        }
-
-        foreach (var edge in edges)
-        {
-            var targetId = edge.TargetSymbolId;
-            var wasResolved = false;
-
-            // Check if target is a GUID (already resolved)
-            if (!Guid.TryParse(targetId, out _))
-            {
-                // Target is a qualified name string, try to resolve it
-                var normalizedTarget = NormalizeQualifiedName(targetId);
-
-                // First check current batch
-                if (currentBatchLookup.TryGetValue(normalizedTarget, out var resolvedId))
-                {
-                    targetId = resolvedId;
-                    wasResolved = true;
-                    _logger.LogDebug("Resolved edge target '{OriginalTarget}' -> '{NormalizedTarget}' to symbol ID {SymbolId} (current batch)",
-                        edge.TargetSymbolId, normalizedTarget, resolvedId);
-                }
-                // Then check database
-                else if (databaseLookup.TryGetValue(normalizedTarget, out resolvedId))
-                {
-                    targetId = resolvedId;
-                    wasResolved = true;
-                    _logger.LogDebug("Resolved edge target '{OriginalTarget}' -> '{NormalizedTarget}' to symbol ID {SymbolId} (database)",
-                        edge.TargetSymbolId, normalizedTarget, resolvedId);
-                }
-                // If still not resolved, skip this edge (external reference)
-                else
-                {
-                    _logger.LogDebug("Could not resolve edge target '{OriginalTarget}' -> '{NormalizedTarget}' (external reference or missing symbol)",
-                        edge.TargetSymbolId, normalizedTarget);
-                    // Skip edges to external symbols (framework types, etc.)
-                    continue;
-                }
-            }
-
-            if (wasResolved)
-            {
-                resolvedCount++;
-            }
-
-            resolvedEdges.Add(new SymbolEdge
-            {
-                Id = edge.Id,
-                SourceSymbolId = edge.SourceSymbolId,
-                TargetSymbolId = targetId,
-                Kind = edge.Kind,
-                RepositoryName = edge.RepositoryName,
-                BranchName = edge.BranchName,
-                CommitSha = edge.CommitSha,
-                IndexedAt = edge.IndexedAt
-            });
-        }
-
-        return (resolvedEdges, resolvedCount);
     }
 
     /// <summary>
@@ -1015,4 +542,3 @@ public sealed class IndexingResult
     /// </summary>
     public int TotalEdges { get; set; }
 }
-
