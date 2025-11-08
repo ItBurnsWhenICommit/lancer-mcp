@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+
 namespace LancerMcp.Models;
 
 /// <summary>
@@ -27,8 +29,9 @@ public sealed class RepositoryState
 
     /// <summary>
     /// Tracked branches and their current state.
+    /// Thread-safe concurrent dictionary for safe multi-threaded access.
     /// </summary>
-    public Dictionary<string, BranchState> Branches { get; init; } = new();
+    public ConcurrentDictionary<string, BranchState> Branches { get; init; } = new();
 
     /// <summary>
     /// Last time the repository was updated.

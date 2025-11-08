@@ -29,6 +29,7 @@ public sealed class EmbeddingService : IDisposable
 
     /// <summary>
     /// Generates embeddings for a batch of code chunks.
+    /// Returns empty list if embedding service is not configured or unavailable (graceful degradation).
     /// </summary>
     public async Task<List<Embedding>> GenerateEmbeddingsAsync(IReadOnlyList<CodeChunk> chunks, CancellationToken cancellationToken = default)
     {
@@ -39,8 +40,8 @@ public sealed class EmbeddingService : IDisposable
 
         if (string.IsNullOrEmpty(_options.CurrentValue.EmbeddingServiceUrl))
         {
-            throw new InvalidOperationException(
-                "EmbeddingServiceUrl is not configured. Please set it in appsettings.json or environment variables.");
+            _logger.LogInformation("Embedding service not configured, skipping embeddings (graceful degradation)");
+            return new List<Embedding>();
         }
 
         _logger.LogInformation("Generating embeddings for {Count} chunks", chunks.Count);
@@ -146,15 +147,15 @@ public sealed class EmbeddingService : IDisposable
         catch (HttpRequestException ex)
         {
             var serviceUrl = _options.CurrentValue.EmbeddingServiceUrl;
-            _logger.LogError(ex, "Failed to communicate with embedding service at {Url}", serviceUrl);
-            throw new InvalidOperationException(
-                $"Embedding service unavailable at {serviceUrl}. " +
-                "Make sure the TEI Docker container is running.", ex);
+            _logger.LogWarning(ex, "Embedding service unavailable at {Url}, skipping embeddings (graceful degradation)", serviceUrl);
+            // Return empty list instead of throwing - embeddings are optional for core functionality
+            return new List<Embedding>();
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to generate embeddings for {Count} chunks", chunks.Count);
-            throw;
+            _logger.LogWarning(ex, "Failed to generate embeddings for {Count} chunks, skipping (graceful degradation)", chunks.Count);
+            // Return empty list instead of throwing - embeddings are optional for core functionality
+            return new List<Embedding>();
         }
     }
 

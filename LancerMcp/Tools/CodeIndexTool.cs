@@ -86,7 +86,15 @@ public sealed class CodeIndexTool
                 }
 
                 // STEP 3: Index files if needed
-                var branchState = repoState.Branches[targetBranch];
+                if (!repoState.Branches.TryGetValue(targetBranch, out var branchState))
+                {
+                    return JsonSerializer.Serialize(new
+                    {
+                        error = $"Branch '{targetBranch}' not found in repository '{repository}'",
+                        availableBranches = await _gitTracker.GetRemoteBranchesAsync(repository, cancellationToken)
+                    });
+                }
+
                 if (branchState.NeedsIndexing)
                 {
                     _logger.LogInformation("Branch {Branch} needs indexing, triggering indexing now", targetBranch);

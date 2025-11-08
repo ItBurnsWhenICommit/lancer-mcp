@@ -42,12 +42,14 @@ public class BranchCleanupHostedServiceTests : IDisposable
         // Create mock repositories (no-op implementations for testing)
         var mockRepoRepository = new MockRepositoryRepository();
         var mockBranchRepository = new MockBranchRepository();
+        var mockWorkspaceLoader = CreateMockWorkspaceLoader();
 
         _gitTracker = new GitTrackerService(
             NullLogger<GitTrackerService>.Instance,
             _options,
             mockRepoRepository,
-            mockBranchRepository);
+            mockBranchRepository,
+            mockWorkspaceLoader);
 
         _cleanupService = new BranchCleanupHostedService(
             _gitTracker,
@@ -188,6 +190,16 @@ public class BranchCleanupHostedServiceTests : IDisposable
 
         public Task<int> DeleteByRepoIdAsync(string repoId, CancellationToken cancellationToken = default)
             => Task.FromResult(0);
+    }
+
+    /// <summary>
+    /// Stub WorkspaceLoader for testing (WorkspaceLoader is sealed, so we just create an instance).
+    /// </summary>
+    private static WorkspaceLoader CreateMockWorkspaceLoader()
+    {
+        // WorkspaceLoader is sealed, so we create a real instance
+        // Tests don't actually use it since we're not loading workspaces in unit tests
+        return new WorkspaceLoader(NullLogger<WorkspaceLoader>.Instance);
     }
 }
 

@@ -108,7 +108,7 @@ public sealed class CodeChunkRepository : ICodeChunkRepository
                    documentation, created_at AS CreatedAt,
                    ts_rank(to_tsvector('english', content), websearch_to_tsquery('english', @Query)) AS rank
             FROM code_chunks
-            WHERE repo_id = @RepoId
+            WHERE (CASE WHEN @RepoId = '' THEN TRUE ELSE repo_id = @RepoId END)
                   AND to_tsvector('english', content) @@ websearch_to_tsquery('english', @Query)";
 
         if (!string.IsNullOrEmpty(branchName))

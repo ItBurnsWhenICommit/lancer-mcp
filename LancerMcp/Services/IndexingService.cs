@@ -258,6 +258,9 @@ public sealed class IndexingService
                     cancellationToken);
             }
 
+            // Cache the source text to avoid re-reading from Git during chunking
+            parsedFile.SourceText = content;
+
             return parsedFile;
         }
         catch (Exception ex)

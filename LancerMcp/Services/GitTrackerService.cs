@@ -39,11 +39,27 @@ public sealed class GitTrackerService : IDisposable
     }
 
     /// <summary>
-    /// Creates credentials provider for Git operations (uses SSH agent for authentication).
+    /// Creates credentials provider for Git operations.
+    /// LibGit2Sharp 0.31.0+ supports SSH through libgit2's OpenSSH support.
+    /// SSH authentication uses the system's SSH configuration and keys automatically.
     /// </summary>
     private Credentials CreateCredentialsProvider(string url, string usernameFromUrl, SupportedCredentialTypes types)
     {
         _logger.LogDebug("Credentials requested for {Url}, username: {Username}, types: {Types}", url, usernameFromUrl, types);
+
+        // Detect SSH URLs (git@host:repo.git or ssh://host/repo.git)
+        if (url.StartsWith("git@", StringComparison.OrdinalIgnoreCase) || url.StartsWith("ssh://", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogDebug("SSH URL detected for {Url}, using OpenSSH support via DefaultCredentials", url);
+            // LibGit2Sharp 0.31.0+ includes libgit2 v1.8.4 with OpenSSH support
+            // DefaultCredentials will use the system's SSH configuration (~/.ssh/config)
+            // and SSH keys (~/.ssh/id_rsa, ~/.ssh/id_ed25519, etc.)
+        }
+
+        // DefaultCredentials will:
+        // - For SSH URLs: Use OpenSSH support (system SSH config and keys)
+        // - For HTTPS URLs: Use system credential manager
+        _logger.LogDebug("Using default credentials provider for {Url}", url);
         return new DefaultCredentials();
     }
 

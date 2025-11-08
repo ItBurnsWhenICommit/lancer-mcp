@@ -74,7 +74,8 @@ public sealed class SymbolRepository : ISymbolRepository
                        end_column AS EndColumn, signature, documentation, modifiers,
                        parent_symbol_id AS ParentSymbolId, indexed_at AS IndexedAt
                 FROM symbols
-                WHERE repo_id = @RepoId AND (name % @Query OR qualified_name % @Query)
+                WHERE (CASE WHEN @RepoId = '' THEN TRUE ELSE repo_id = @RepoId END)
+                  AND (name % @Query OR qualified_name % @Query)
                 ORDER BY GREATEST(similarity(name, @Query), similarity(COALESCE(qualified_name, ''), @Query)) DESC
                 LIMIT @Limit";
         }
@@ -88,7 +89,8 @@ public sealed class SymbolRepository : ISymbolRepository
                        end_column AS EndColumn, signature, documentation, modifiers,
                        parent_symbol_id AS ParentSymbolId, indexed_at AS IndexedAt
                 FROM symbols
-                WHERE repo_id = @RepoId AND (name ILIKE @Query || '%' OR qualified_name ILIKE @Query || '%')
+                WHERE (CASE WHEN @RepoId = '' THEN TRUE ELSE repo_id = @RepoId END)
+                  AND (name ILIKE @Query || '%' OR qualified_name ILIKE @Query || '%')
                 ORDER BY name
                 LIMIT @Limit";
         }
