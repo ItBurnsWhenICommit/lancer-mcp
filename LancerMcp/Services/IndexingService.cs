@@ -26,7 +26,12 @@ public sealed class IndexingService
 
     // Static lock dictionary to prevent concurrent workspace checkouts across IndexingService instances
     // Key: "repositoryName:branchName"
+    // Locks are created on-demand and reused across IndexingService instances to prevent concurrent
+    // checkout operations on the same repository/branch combination.
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> _checkoutLocks = new();
+
+    // Track last access time for each lock to enable cleanup of unused locks
+    private static readonly ConcurrentDictionary<string, DateTime> _lockLastAccess = new();
 
     public IndexingService(
         ILogger<IndexingService> logger,
@@ -94,6 +99,9 @@ public sealed class IndexingService
                 // Get or create a lock for this repository/branch combination
                 var lockKey = $"{group.Key.RepositoryName}:{group.Key.BranchName}";
                 var checkoutLock = _checkoutLocks.GetOrAdd(lockKey, _ => new SemaphoreSlim(1, 1));
+
+                // Track access time for cleanup
+                _lockLastAccess[lockKey] = DateTime.UtcNow;
 
                 // Acquire lock to prevent concurrent checkout operations across IndexingService instances
                 await checkoutLock.WaitAsync(cancellationToken);
@@ -511,6 +519,35 @@ public sealed class IndexingService
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Cleans up checkout locks that haven't been accessed in the specified time period.
+    /// This prevents memory leaks from accumulating locks for branches that are no longer indexed.
+    /// </summary>
+    /// <param name="olderThan">Remove locks not accessed within this timespan (default: 7 days)</param>
+    /// <returns>Number of locks removed</returns>
+    public static int CleanupUnusedCheckoutLocks(TimeSpan? olderThan = null)
+    {
+        var threshold = olderThan ?? TimeSpan.FromDays(7);
+        var cutoff = DateTime.UtcNow - threshold;
+        var removed = 0;
+
+        foreach (var kvp in _lockLastAccess.ToArray())
+        {
+            if (kvp.Value < cutoff)
+            {
+                // Remove from both dictionaries
+                if (_lockLastAccess.TryRemove(kvp.Key, out _) &&
+                    _checkoutLocks.TryRemove(kvp.Key, out var lockObj))
+                {
+                    lockObj.Dispose();
+                    removed++;
+                }
+            }
+        }
+
+        return removed;
     }
 }
 

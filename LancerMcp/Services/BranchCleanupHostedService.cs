@@ -83,6 +83,13 @@ public sealed class BranchCleanupHostedService : BackgroundService
         _logger.LogInformation("Starting branch cleanup (removing branches not accessed for {Days} days)", staleDays);
 
         await _gitTracker.CleanupStaleBranchesAsync(staleDays, cancellationToken);
+
+        // Also cleanup unused checkout locks to prevent memory leaks
+        var removedLocks = IndexingService.CleanupUnusedCheckoutLocks(TimeSpan.FromDays(staleDays));
+        if (removedLocks > 0)
+        {
+            _logger.LogInformation("Cleaned up {Count} unused checkout locks", removedLocks);
+        }
     }
 }
 

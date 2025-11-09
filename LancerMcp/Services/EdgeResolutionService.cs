@@ -85,7 +85,7 @@ public sealed class EdgeResolutionService
                 {
                     RepoId = repoGroup.Key.RepositoryName,
                     BranchName = repoGroup.Key.BranchName,
-                    QualifiedNames = targetQualifiedNames.ToArray()
+                    QualifiedNames = targetQualifiedNames.ToArray() // Npgsql requires CLR array for PostgreSQL array type
                 },
                 transaction,
                 cancellationToken: cancellationToken);
@@ -169,6 +169,11 @@ public sealed class EdgeResolutionService
 
     /// <summary>
     /// Normalizes qualified names for consistent lookups (case-insensitive, trimmed).
+    /// Uses ToLowerInvariant() which is culture-invariant.
+    ///
+    /// Note: The database query uses LOWER() which is locale-dependent. This works correctly
+    /// for ASCII qualified names (typical in C#), but may have edge cases with non-ASCII symbols
+    /// if the database locale differs from invariant culture (e.g., Turkish İ/i).
     /// </summary>
     private static string NormalizeQualifiedName(string qualifiedName)
     {

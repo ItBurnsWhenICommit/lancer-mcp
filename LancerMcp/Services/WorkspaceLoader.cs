@@ -11,7 +11,8 @@ public sealed class WorkspaceLoader : IDisposable
 {
     private readonly ILogger<WorkspaceLoader> _logger;
     private readonly ConcurrentDictionary<string, WorkspaceCache> _workspaceCache = new();
-    private readonly SemaphoreSlim _loadLock = new(1, 1);
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _perKeyLocks = new();
+    private volatile bool _disposed;
 
     public WorkspaceLoader(ILogger<WorkspaceLoader> logger)
     {
@@ -25,20 +26,28 @@ public sealed class WorkspaceLoader : IDisposable
     /// </summary>
     public async Task<WorkspaceHandle?> GetOrLoadWorkspaceAsync(string repositoryPath, string branchName, CancellationToken cancellationToken = default)
     {
+        if (_disposed)
+        {
+            throw new ObjectDisposedException(nameof(WorkspaceLoader));
+        }
+
         // Cache key includes both repository path and branch name
         var cacheKey = $"{repositoryPath}:{branchName}";
 
-        // Check cache first
+        // Fast path: Check cache first without locking
         if (_workspaceCache.TryGetValue(cacheKey, out var cached))
         {
             return cached.AcquireReference();
         }
 
-        // Load workspace (with lock to prevent concurrent loads)
-        await _loadLock.WaitAsync(cancellationToken);
+        // Slow path: Load workspace with lock to prevent concurrent loads for the same key
+        // Use per-key locking to minimize contention between different repositories/branches
+        var perKeyLock = _perKeyLocks.GetOrAdd(cacheKey, _ => new SemaphoreSlim(1, 1));
+
+        await perKeyLock.WaitAsync(cancellationToken);
         try
         {
-            // Double-check after acquiring lock
+            // Double-check after acquiring lock (another thread may have loaded it)
             if (_workspaceCache.TryGetValue(cacheKey, out cached))
             {
                 return cached.AcquireReference();
@@ -66,7 +75,7 @@ public sealed class WorkspaceLoader : IDisposable
         }
         finally
         {
-            _loadLock.Release();
+            perKeyLock.Release();
         }
     }
 
@@ -183,6 +192,7 @@ public sealed class WorkspaceLoader : IDisposable
     ///
     /// This marks workspaces for disposal and removes them from the cache.
     /// Actual disposal happens when all active references are released (safe for concurrent indexing).
+    /// Also removes the corresponding per-key locks to prevent unbounded memory growth.
     /// </summary>
     public void ClearCache(string repositoryPath, string? branchName = null)
     {
@@ -193,6 +203,13 @@ public sealed class WorkspaceLoader : IDisposable
             if (_workspaceCache.TryRemove(cacheKey, out var workspace))
             {
                 workspace.MarkForDisposal();
+
+                // Remove and dispose the corresponding lock
+                if (_perKeyLocks.TryRemove(cacheKey, out var lockObj))
+                {
+                    lockObj.Dispose();
+                }
+
                 _logger.LogInformation("Cleared workspace cache for repository: {RepositoryPath}, branch: {BranchName}", repositoryPath, branchName);
             }
         }
@@ -208,6 +225,12 @@ public sealed class WorkspaceLoader : IDisposable
                 if (_workspaceCache.TryRemove(key, out var workspace))
                 {
                     workspace.MarkForDisposal();
+
+                    // Remove and dispose the corresponding lock
+                    if (_perKeyLocks.TryRemove(key, out var lockObj))
+                    {
+                        lockObj.Dispose();
+                    }
                 }
             }
 
@@ -220,12 +243,28 @@ public sealed class WorkspaceLoader : IDisposable
 
     public void Dispose()
     {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+
+        // Dispose all workspaces
         foreach (var cache in _workspaceCache.Values)
         {
             cache.Workspace.Dispose();
         }
         _workspaceCache.Clear();
-        _loadLock.Dispose();
+
+        // Dispose any remaining per-key locks
+        // Note: Locks are normally removed when cache entries are evicted via ClearCache(),
+        // but we clean up any remaining locks here during final disposal.
+        foreach (var lockObj in _perKeyLocks.Values)
+        {
+            lockObj.Dispose();
+        }
+        _perKeyLocks.Clear();
     }
 
     /// <summary>
