@@ -24,10 +24,10 @@ public sealed class IndexingService
     private readonly EdgeResolutionService _edgeResolutionService;
     private readonly SemaphoreSlim _concurrencyLimiter;
 
-    // Static lock dictionary to prevent concurrent workspace checkouts across IndexingService instances
-    // Key: "repositoryName:branchName"
-    // Locks are created on-demand and reused across IndexingService instances to prevent concurrent
-    // checkout operations on the same repository/branch combination.
+    // Static lock dictionary keyed by "repositoryName:branchName".
+    // Although IndexingService is registered as a singleton, multiple concurrent operations can run inside it.
+    // These locks coordinate workspace checkout across those concurrent operations to ensure only one checkout
+    // per repo/branch happens at a time.
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> _checkoutLocks = new();
 
     // Track last access time for each lock to enable cleanup of unused locks
