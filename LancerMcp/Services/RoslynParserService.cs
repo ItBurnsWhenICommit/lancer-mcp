@@ -382,7 +382,6 @@ public sealed class RoslynParserService
                 if (symbolInfo.Symbol != null)
                 {
                     qualifiedName = symbolInfo.Symbol.ToDisplayString();
-                    _logger.LogDebug("Resolved symbol from semantic model: {QualifiedName}", qualifiedName);
                 }
                 else
                 {
@@ -390,12 +389,6 @@ public sealed class RoslynParserService
                     // This handles cases where the semantic model can't resolve the symbol
                     // (e.g., due to incomplete compilation or missing references)
                     qualifiedName = TryGetQualifiedNameFromInvocation(invocation);
-                    if (!string.IsNullOrEmpty(qualifiedName))
-                    {
-                        var invocationString = invocation.ToString();
-                        _logger.LogDebug("Fallback qualified name from invocation: {QualifiedName} for {Invocation}",
-                            qualifiedName, invocationString.Substring(0, Math.Min(50, invocationString.Length)));
-                    }
                 }
 
                 if (!string.IsNullOrEmpty(qualifiedName))
@@ -404,15 +397,6 @@ public sealed class RoslynParserService
                     var targetSymbolId = _symbolLookup.TryGetValue(qualifiedName, out var symbolId)
                         ? symbolId
                         : qualifiedName;
-
-                    if (symbolId != null)
-                    {
-                        _logger.LogDebug("Resolved to symbol ID: {SymbolId}", symbolId);
-                    }
-                    else
-                    {
-                        _logger.LogDebug("Using qualified name as target: {QualifiedName}", qualifiedName);
-                    }
 
                     var edge = new SymbolEdge
                     {
