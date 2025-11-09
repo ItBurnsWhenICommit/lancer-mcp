@@ -34,7 +34,7 @@ Index Scan using idx_symbols_qualified_name_lower on symbols
   (cost=0.28..13.62 rows=4 width=119) (actual time=0.064..0.065 rows=1 loops=1)
 ```
 
-✅ **Status:** Index is used (verified 2025-11-09)
+✅ **Status:** Index is used
 
 #### Test 2: Multiple Values with ANY Operator
 ```sql
@@ -55,7 +55,7 @@ Index Scan using idx_symbols_qualified_name_lower on symbols
   (cost=0.28..26.74 rows=9 width=119) (actual time=0.064..0.065 rows=1 loops=1)
 ```
 
-✅ **Status:** Index is used (verified 2025-11-09)
+✅ **Status:** Index is used
 
 #### Test 3: Large Array (10+ items)
 ```sql
@@ -76,7 +76,7 @@ Index Scan using idx_symbols_qualified_name_lower on symbols
   (cost=0.28..103.19 rows=44 width=119)
 ```
 
-✅ **Status:** Index is used even with large arrays (verified 2025-11-09)
+✅ **Status:** Index is used with arrays up to 10 values
 
 ### Performance Comparison
 
