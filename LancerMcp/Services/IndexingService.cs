@@ -403,7 +403,7 @@ public sealed class IndexingService
                 FilePath = f.FilePath,
                 Language = f.Language,
                 SizeBytes = f.SourceText != null ? System.Text.Encoding.UTF8.GetByteCount(f.SourceText) : 0,
-                LineCount = f.SourceText != null ? f.SourceText.Count(c => c == '\n') + 1 : 0,
+                LineCount = f.SourceText != null ? CalculateLineCount(f.SourceText) : 0,
                 IndexedAt = DateTimeOffset.UtcNow
             }).ToList();
 
@@ -524,6 +524,28 @@ public sealed class IndexingService
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Calculates the number of lines in a file. Returns 0 for empty files.
+    /// </summary>
+    private static int CalculateLineCount(string content)
+    {
+        if (string.IsNullOrEmpty(content))
+        {
+            return 0;
+        }
+
+        var lineCount = 1; // Non-empty files have at least one line
+        for (var i = 0; i < content.Length; i++)
+        {
+            if (content[i] == '\n')
+            {
+                lineCount++;
+            }
+        }
+
+        return lineCount;
     }
 
     /// <summary>
