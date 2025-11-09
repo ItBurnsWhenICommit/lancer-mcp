@@ -76,6 +76,7 @@ public sealed class WorkspaceLoader : IDisposable
     /// </summary>
     private async Task<WorkspaceCache?> LoadWorkspaceAsync(string repositoryPath, string branchName, CancellationToken cancellationToken)
     {
+        MSBuildWorkspace? workspace = null;
         try
         {
             // Find solution or project files, skipping .git and build output directories
@@ -90,7 +91,7 @@ public sealed class WorkspaceLoader : IDisposable
             }
 
             // Create MSBuild workspace
-            var workspace = MSBuildWorkspace.Create();
+            workspace = MSBuildWorkspace.Create();
 
             // Suppress diagnostics for cleaner logs
             workspace.WorkspaceFailed += (sender, args) =>
@@ -169,6 +170,8 @@ public sealed class WorkspaceLoader : IDisposable
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to load workspace for repository: {RepositoryPath}", repositoryPath);
+            // Dispose workspace if it was created but loading failed
+            workspace?.Dispose();
             return null;
         }
     }

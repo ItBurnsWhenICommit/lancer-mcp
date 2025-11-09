@@ -215,8 +215,6 @@ public sealed class RoslynParserService
             ExtractParameterTypeEdges(node.ParameterList, symbol.Id);
 
             // Extract method calls
-            _logger.LogDebug("Visiting method {MethodName}, has body: {HasBody}, has expression body: {HasExpressionBody}",
-                node.Identifier.Text, node.Body != null, node.ExpressionBody != null);
             ExtractMethodCalls(node.Body, symbol.Id);
 
             base.VisitMethodDeclaration(node);
