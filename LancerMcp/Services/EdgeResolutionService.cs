@@ -68,7 +68,10 @@ public sealed class EdgeResolutionService
 
             // Query symbols scoped to the same repo and branch to prevent cross-repo contamination
             // Uses the functional index idx_symbols_qualified_name_lower (created in 06_performance_indexes.sql)
-            // for efficient case-insensitive lookups without sequential scans
+            // for efficient case-insensitive lookups without sequential scans.
+            // Note: PostgreSQL's query planner uses the index with the ANY operator for typical array sizes
+            // (verified up to 10 values). For very large arrays (100+ values), the planner may switch to
+            // bitmap/sequential scans depending on selectivity.
             const string sql = @"
                 SELECT id, qualified_name
                 FROM symbols
