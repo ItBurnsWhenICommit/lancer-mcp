@@ -292,9 +292,11 @@ public sealed class WorkspaceLoader : IDisposable
 
 /// <summary>
 /// Cached workspace data for a repository branch with reference counting for safe disposal.
+/// Thread-safe: All access to _referenceCount and _isMarkedForDisposal is protected by _lock.
 /// </summary>
 public sealed class WorkspaceCache : IDisposable
 {
+    // All access to these fields is protected by _lock for thread safety
     private int _referenceCount;
     private bool _isMarkedForDisposal;
     private readonly object _lock = new();

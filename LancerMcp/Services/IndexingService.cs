@@ -272,7 +272,11 @@ public sealed class IndexingService
                     cancellationToken);
             }
 
-            // Cache the source text to avoid re-reading from Git during chunking
+            // Cache the source text to avoid re-reading from Git during chunking.
+            // ChunkingService (line 37-49 of ChunkingService.cs) uses this cached text
+            // to avoid the performance cost of reading from Git's object database again.
+            // Without this cache, each file would be read from Git twice: once for parsing
+            // and once for chunking, which is expensive for large repositories.
             parsedFile.SourceText = content;
 
             return parsedFile;

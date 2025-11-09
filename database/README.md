@@ -88,6 +88,7 @@ This will:
    - `03_chunks_embeddings.sql` - Create code_chunks and embeddings tables with vector indexes
    - `04_functions.sql` - Create search and graph traversal functions
    - `05_materialized_views.sql` - Create statistics and analytics views
+   - `06_performance_indexes.sql` - Create performance optimization indexes (functional indexes for case-insensitive lookups)
 
 ### 3. Verify Installation
 ```bash
@@ -197,6 +198,11 @@ Stores vector embeddings for code chunks.
 - `idx_edges_source_symbol_id` - B-tree index for outgoing edges
 - `idx_edges_target_symbol_id` - B-tree index for incoming edges
 - `idx_edges_composite` - GIN index for multi-column queries
+
+#### Performance Optimization
+- `idx_symbols_qualified_name_lower` - Functional index on `LOWER(qualified_name)` for case-insensitive symbol lookups
+  - Enables index usage in EdgeResolutionService when resolving cross-file symbol references
+  - Prevents sequential scans on the symbols table during edge resolution
 
 ## Search Functions
 

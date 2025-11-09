@@ -394,8 +394,9 @@ public sealed class RoslynParserService
                     qualifiedName = TryGetQualifiedNameFromInvocation(invocation);
                     if (!string.IsNullOrEmpty(qualifiedName))
                     {
+                        var invocationString = invocation.ToString();
                         _logger.LogDebug("Fallback qualified name from invocation: {QualifiedName} for {Invocation}",
-                            qualifiedName, invocation.ToString().Substring(0, Math.Min(50, invocation.ToString().Length)));
+                            qualifiedName, invocationString.Substring(0, Math.Min(50, invocationString.Length)));
                     }
                 }
 

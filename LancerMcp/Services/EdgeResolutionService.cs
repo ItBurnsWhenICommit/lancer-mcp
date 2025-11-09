@@ -67,7 +67,8 @@ public sealed class EdgeResolutionService
                 continue;
 
             // Query symbols scoped to the same repo and branch to prevent cross-repo contamination
-            // This also allows the query to use the (repo_id, branch_name, qualified_name) index
+            // Uses the functional index idx_symbols_qualified_name_lower (created in 06_performance_indexes.sql)
+            // for efficient case-insensitive lookups without sequential scans
             const string sql = @"
                 SELECT id, qualified_name
                 FROM symbols
