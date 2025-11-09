@@ -97,6 +97,11 @@ public sealed class IndexingService
             if (!string.IsNullOrEmpty(repositoryPath))
             {
                 // Get or create a lock for this repository/branch combination
+                // Note: GetOrAdd can create multiple SemaphoreSlim instances under concurrent access,
+                // though only one will be stored. The unused instances will not be disposed, resulting
+                // in a minor memory leak. This is an acceptable tradeoff for performance, as using a
+                // synchronized lock pattern would introduce contention. Unused locks are cleaned up
+                // periodically via CleanupUnusedCheckoutLocks().
                 var lockKey = $"{group.Key.RepositoryName}:{group.Key.BranchName}";
                 var checkoutLock = _checkoutLocks.GetOrAdd(lockKey, _ => new SemaphoreSlim(1, 1));
 

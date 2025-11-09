@@ -12,7 +12,7 @@ namespace LancerMcp.Services;
 public sealed class RoslynParserService
 {
     private static readonly Lazy<ImmutableArray<MetadataReference>> _defaultMetadataReferences =
-        new(LoadMetadataReferences);
+        new(LoadMetadataReferences, LazyThreadSafetyMode.ExecutionAndPublication);
     private readonly ILogger<RoslynParserService> _logger;
 
     public RoslynParserService(ILogger<RoslynParserService> logger)
