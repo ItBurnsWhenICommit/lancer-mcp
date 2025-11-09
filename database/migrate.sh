@@ -118,6 +118,7 @@ main() {
         "03_chunks_embeddings.sql"
         "04_functions.sql"
         "05_materialized_views.sql"
+        "06_performance_indexes.sql"
     )
 
     local failed=0

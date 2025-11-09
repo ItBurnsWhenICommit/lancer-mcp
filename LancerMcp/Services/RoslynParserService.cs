@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -10,6 +11,8 @@ namespace LancerMcp.Services;
 /// </summary>
 public sealed class RoslynParserService
 {
+    private static readonly Lazy<ImmutableArray<MetadataReference>> _defaultMetadataReferences =
+        new(LoadMetadataReferences, LazyThreadSafetyMode.ExecutionAndPublication);
     private readonly ILogger<RoslynParserService> _logger;
 
     public RoslynParserService(ILogger<RoslynParserService> logger)
@@ -20,17 +23,20 @@ public sealed class RoslynParserService
     /// <summary>
     /// Parses a C# file and extracts symbols and edges.
     /// </summary>
+    /// <param name="workspaceCompilation">Optional workspace compilation for full semantic analysis. If null, uses fallback compilation.</param>
     public async Task<ParsedFile> ParseFileAsync(
         string repositoryName,
         string branchName,
         string commitSha,
         string filePath,
         string content,
+        Compilation? workspaceCompilation = null,
         CancellationToken cancellationToken = default)
     {
         try
         {
-            var tree = CSharpSyntaxTree.ParseText(content, path: filePath, cancellationToken: cancellationToken);
+            var parseOptions = CSharpParseOptions.Default;
+            var tree = CSharpSyntaxTree.ParseText(content, options: parseOptions, path: filePath, cancellationToken: cancellationToken);
             var root = await tree.GetRootAsync(cancellationToken);
 
             var parsedFile = new ParsedFile
@@ -43,12 +49,33 @@ public sealed class RoslynParserService
                 Success = true
             };
 
-            // Create a compilation for semantic analysis
-            var compilation = CSharpCompilation.Create("TempCompilation")
-                .AddReferences(MetadataReference.CreateFromFile(typeof(object).Assembly.Location))
-                .AddSyntaxTrees(tree);
+            SemanticModel semanticModel;
 
-            var semanticModel = compilation.GetSemanticModel(tree);
+            // Use workspace compilation if available, otherwise create a minimal one
+            if (workspaceCompilation != null)
+            {
+                // Add the current file's syntax tree to the workspace compilation
+                var updatedCompilation = workspaceCompilation.AddSyntaxTrees(tree);
+                semanticModel = updatedCompilation.GetSemanticModel(tree);
+
+                _logger.LogDebug(
+                    "Using workspace compilation for {FilePath} with {ReferenceCount} references",
+                    filePath,
+                    workspaceCompilation.References.Count());
+            }
+            else
+            {
+                // Fallback: Create a minimal compilation with framework references
+                var compilation = CSharpCompilation.Create(
+                        assemblyName: "TempCompilation",
+                        syntaxTrees: new[] { tree },
+                        references: _defaultMetadataReferences.Value,
+                        options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+                semanticModel = compilation.GetSemanticModel(tree);
+
+                _logger.LogDebug("Using fallback compilation for {FilePath}", filePath);
+            }
 
             // Extract symbols
             var visitor = new SymbolExtractorVisitor(
@@ -103,6 +130,7 @@ public sealed class RoslynParserService
         private readonly Dictionary<string, string> _symbolLookup = new(); // QualifiedName -> Symbol ID
         private readonly ILogger _logger;
         private readonly Stack<string> _parentSymbolIds = new();
+        private readonly Dictionary<string, string> _fieldTypes = new(); // field name -> type name
 
         public SymbolExtractorVisitor(
             string repositoryName,
@@ -223,6 +251,11 @@ public sealed class RoslynParserService
 
                 // Extract field type edge
                 ExtractTypeEdge(node.Declaration.Type, symbol.Id, EdgeKind.TypeOf);
+
+                // Store field type for later lookup
+                var fieldName = variable.Identifier.Text;
+                var typeName = node.Declaration.Type.ToString();
+                _fieldTypes[fieldName] = typeName;
             }
             base.VisitFieldDeclaration(node);
         }
@@ -340,13 +373,26 @@ public sealed class RoslynParserService
                 return;
 
             var invocations = body.DescendantNodes().OfType<InvocationExpressionSyntax>();
+
             foreach (var invocation in invocations)
             {
                 var symbolInfo = _semanticModel.GetSymbolInfo(invocation);
+                string? qualifiedName = null;
+
                 if (symbolInfo.Symbol != null)
                 {
-                    var qualifiedName = symbolInfo.Symbol.ToDisplayString();
+                    qualifiedName = symbolInfo.Symbol.ToDisplayString();
+                }
+                else
+                {
+                    // Fallback: Try to construct a qualified name from the invocation expression
+                    // This handles cases where the semantic model can't resolve the symbol
+                    // (e.g., due to incomplete compilation or missing references)
+                    qualifiedName = TryGetQualifiedNameFromInvocation(invocation);
+                }
 
+                if (!string.IsNullOrEmpty(qualifiedName))
+                {
                     // Try to resolve to a symbol ID, otherwise use qualified name
                     var targetSymbolId = _symbolLookup.TryGetValue(qualifiedName, out var symbolId)
                         ? symbolId
@@ -364,6 +410,57 @@ public sealed class RoslynParserService
                     _edges.Add(edge);
                 }
             }
+        }
+
+        /// <summary>
+        /// Attempts to extract a qualified method name from an invocation expression.
+        /// This is a fallback for when the semantic model can't resolve the symbol.
+        /// </summary>
+        private string? TryGetQualifiedNameFromInvocation(InvocationExpressionSyntax invocation)
+        {
+            // Try to get the method name from the invocation expression
+            // Examples:
+            // - _db.QueryAsync<T>(...) -> DatabaseService.QueryAsync
+            // - logger.LogInformation(...) -> ILogger.LogInformation
+            // - Console.WriteLine(...) -> Console.WriteLine
+
+            var expression = invocation.Expression;
+
+            // Handle member access (e.g., _db.QueryAsync, logger.LogInformation)
+            if (expression is MemberAccessExpressionSyntax memberAccess)
+            {
+                var memberName = memberAccess.Name.Identifier.Text;
+
+                // Try to get the type of the object being called on
+                var typeInfo = _semanticModel.GetTypeInfo(memberAccess.Expression);
+                if (typeInfo.Type != null)
+                {
+                    var typeName = typeInfo.Type.ToDisplayString();
+                    return $"{typeName}.{memberName}";
+                }
+
+                // Fallback: Check if it's a field we've seen in this file
+                if (memberAccess.Expression is IdentifierNameSyntax identifierName)
+                {
+                    var fieldName = identifierName.Identifier.Text;
+                    if (_fieldTypes.TryGetValue(fieldName, out var fieldType))
+                    {
+                        // Use the field type we stored earlier
+                        return $"{fieldType}.{memberName}";
+                    }
+                }
+
+                // Last resort: Use the expression text
+                return $"{memberAccess.Expression}.{memberName}";
+            }
+
+            // Handle simple identifiers (e.g., MethodName())
+            if (expression is IdentifierNameSyntax identifier)
+            {
+                return identifier.Identifier.Text;
+            }
+
+            return null;
         }
 
         /// <summary>
@@ -443,5 +540,41 @@ public sealed class RoslynParserService
             }
         }
     }
-}
 
+    private static ImmutableArray<MetadataReference> LoadMetadataReferences()
+    {
+        var builder = ImmutableArray.CreateBuilder<MetadataReference>();
+        var trustedAssemblies = AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string;
+
+        if (!string.IsNullOrWhiteSpace(trustedAssemblies))
+        {
+            var uniquePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var path in trustedAssemblies.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (!uniquePaths.Add(path) || !File.Exists(path))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    builder.Add(MetadataReference.CreateFromFile(path));
+                }
+                catch
+                {
+                    // Some runtime assemblies can't be loaded (e.g., native images); skip them silently.
+                }
+            }
+        }
+
+        if (builder.Count == 0)
+        {
+            // Fall back to a small, known set so the semantic model can at least resolve framework basics.
+            builder.Add(MetadataReference.CreateFromFile(typeof(object).Assembly.Location));
+            builder.Add(MetadataReference.CreateFromFile(typeof(Console).Assembly.Location));
+            builder.Add(MetadataReference.CreateFromFile(typeof(Enumerable).Assembly.Location));
+        }
+
+        return builder.ToImmutable();
+    }
+}

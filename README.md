@@ -16,7 +16,7 @@ This is a **LAN-hosted MCP server** written in C#/.NET that:
 - Generates code embeddings using jina-embeddings-v2-base-code
 - Stores data in PostgreSQL with pgvector for vector similarity search
 - Provides hybrid search combining BM25 full-text + vector semantic search + graph re-ranking
-- Exposes a single `Query` MCP tool for AI agents (Faster than multi-tool solutions)
+- Exposes a single `Query` MCP tool for AI agents with per-repository queries
 - Self-hosted alternative to cloud-based code indexing services
 
 ## 💡 Why This Was Made
@@ -78,12 +78,18 @@ Edit `LancerMcp/appsettings.json` to add your repositories:
   "Repositories": [
     {
       "Name": "my-project",
-      "RemoteUrl": "git@github.com:user/repo.git",
+      "RemoteUrl": "https://github.com/user/repo.git",
       "DefaultBranch": "main"
     }
   ]
 }
 ```
+
+**SSH Support**: LibGit2Sharp 0.31.0 includes built-in SSH support through libgit2's OpenSSH integration. Both SSH and HTTPS URLs are supported and verified through automated tests:
+- **SSH URLs** (e.g., `git@github.com:user/repo.git`): Automatically uses your system's SSH agent and SSH keys from `~/.ssh/` directory (e.g., `id_rsa`, `id_ed25519`, etc.)
+- **HTTPS URLs** (e.g., `https://github.com/user/repo.git`): Uses system credential manager or personal access tokens
+
+No additional configuration or packages are required - SSH authentication works out of the box if you have SSH keys set up on your system.
 
 ### 5. Run
 
@@ -94,9 +100,11 @@ dotnet run --project LancerMcp/LancerMcp.csproj
 The server will:
 1. Clone configured repositories (or load existing state from database)
 2. Parse code and extract symbols
-3. Generate embeddings (if embedding service is running)
+3. Generate embeddings (if embedding service is running; optional - skipped if unavailable)
 4. Store data in PostgreSQL (including branch tracking state)
 5. Start MCP server on `http://localhost:5171`
+
+**Note on Embeddings**: The embedding service is optional. If not configured or unavailable, the server will continue operating with graceful degradation - symbol search and code navigation will work, but semantic similarity search will be unavailable.
 
 ## ✅ Features
 

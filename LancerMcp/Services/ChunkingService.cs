@@ -26,6 +26,7 @@ public sealed class ChunkingService
 
     /// <summary>
     /// Chunks a parsed file into code chunks for embedding.
+    /// Uses cached source text from ParsedFile to avoid re-reading from Git.
     /// </summary>
     public async Task<ChunkedFile> ChunkFileAsync(
         ParsedFile parsedFile,
@@ -33,12 +34,19 @@ public sealed class ChunkingService
     {
         try
         {
-            // Get the full file content
-            var content = await _gitTracker.GetFileContentAsync(
-                parsedFile.RepositoryName,
-                parsedFile.CommitSha,
-                parsedFile.FilePath,
-                cancellationToken);
+            // Use cached source text from ParsedFile to avoid re-reading from Git
+            var content = parsedFile.SourceText;
+
+            if (content == null)
+            {
+                // Fallback to reading from Git if source text not cached
+                _logger.LogDebug("Source text not cached for {FilePath}, reading from Git", parsedFile.FilePath);
+                content = await _gitTracker.GetFileContentAsync(
+                    parsedFile.RepositoryName,
+                    parsedFile.CommitSha,
+                    parsedFile.FilePath,
+                    cancellationToken);
+            }
 
             if (content == null)
             {

@@ -19,6 +19,7 @@ public sealed class GitTrackerService : IDisposable
     private readonly IOptionsMonitor<ServerOptions> _options;
     private readonly IRepositoryRepository _repositoryRepository;
     private readonly IBranchRepository _branchRepository;
+    private readonly WorkspaceLoader _workspaceLoader;
     private readonly ConcurrentDictionary<string, RepositoryState> _repositories = new();
     private readonly SemaphoreSlim _updateLock = new(1, 1);
     private bool _disposed;
@@ -27,21 +28,83 @@ public sealed class GitTrackerService : IDisposable
         ILogger<GitTrackerService> logger,
         IOptionsMonitor<ServerOptions> options,
         IRepositoryRepository repositoryRepository,
-        IBranchRepository branchRepository)
+        IBranchRepository branchRepository,
+        WorkspaceLoader workspaceLoader)
     {
         _logger = logger;
         _options = options;
         _repositoryRepository = repositoryRepository;
         _branchRepository = branchRepository;
+        _workspaceLoader = workspaceLoader;
     }
 
     /// <summary>
-    /// Creates credentials provider for Git operations (uses SSH agent for authentication).
+    /// Creates credentials provider for Git operations.
+    /// LibGit2Sharp 0.31.0+ supports SSH through libgit2's OpenSSH support.
+    /// SSH authentication uses the system's SSH configuration and keys automatically.
     /// </summary>
     private Credentials CreateCredentialsProvider(string url, string usernameFromUrl, SupportedCredentialTypes types)
     {
         _logger.LogDebug("Credentials requested for {Url}, username: {Username}, types: {Types}", url, usernameFromUrl, types);
+
+        // Detect SSH URLs (git@host:repo.git or ssh://host/repo.git)
+        if (url.StartsWith("git@", StringComparison.OrdinalIgnoreCase) || url.StartsWith("ssh://", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogDebug("SSH URL detected for {Url}, using OpenSSH support via DefaultCredentials", url);
+            // LibGit2Sharp 0.31.0+ includes libgit2 v1.8.4 with OpenSSH support
+            // DefaultCredentials will use the system's SSH configuration (~/.ssh/config)
+            // and SSH keys (~/.ssh/id_rsa, ~/.ssh/id_ed25519, etc.)
+        }
+
+        // DefaultCredentials will:
+        // - For SSH URLs: Use OpenSSH support (system SSH config and keys)
+        // - For HTTPS URLs: Use system credential manager
+        _logger.LogDebug("Using default credentials provider for {Url}", url);
         return new DefaultCredentials();
+    }
+
+    /// <summary>
+    /// Ensures the working tree is checked out to the specified branch.
+    /// This is the centralized, synchronized method for branch checkout.
+    /// MUST be called before loading workspace to ensure correct branch state.
+    /// </summary>
+    public async Task EnsureBranchCheckedOutAsync(string repositoryName, string branchName, CancellationToken cancellationToken = default)
+    {
+        await _updateLock.WaitAsync(cancellationToken);
+        try
+        {
+            var repoState = _repositories.GetValueOrDefault(repositoryName);
+            if (repoState == null)
+            {
+                _logger.LogWarning("Repository {RepositoryName} not found for branch checkout", repositoryName);
+                return;
+            }
+
+            using var repo = new GitRepository(repoState.LocalPath);
+            var currentBranch = repo.Head.FriendlyName;
+
+            if (currentBranch != branchName)
+            {
+                _logger.LogDebug("Checking out branch {BranchName} in repository {RepositoryName} (current: {CurrentBranch})",
+                    branchName, repositoryName, currentBranch);
+
+                var branch = repo.Branches[branchName] ?? repo.Branches[$"origin/{branchName}"];
+                if (branch != null)
+                {
+                    var checkoutOptions = new CheckoutOptions { CheckoutModifiers = CheckoutModifiers.Force };
+                    await Task.Run(() => Commands.Checkout(repo, branch, checkoutOptions), cancellationToken);
+                    _logger.LogDebug("Checked out branch {BranchName} in repository {RepositoryName}", branchName, repositoryName);
+                }
+                else
+                {
+                    _logger.LogWarning("Branch {BranchName} not found in repository {RepositoryName}", branchName, repositoryName);
+                }
+            }
+        }
+        finally
+        {
+            _updateLock.Release();
+        }
     }
 
     /// <summary>
@@ -109,14 +172,31 @@ public sealed class GitTrackerService : IDisposable
             if (state.IsCloned)
                 return;
 
+            bool needsClone = false;
+
             if (!Directory.Exists(state.LocalPath) || !GitRepository.IsValid(state.LocalPath))
+            {
+                needsClone = true;
+            }
+            else
+            {
+                // Check if existing repository is bare (from old configuration)
+                using var existingRepo = new GitRepository(state.LocalPath);
+                if (existingRepo.Info.IsBare)
+                {
+                    _logger.LogWarning("Repository {Name} at {Path} is bare, re-cloning with working tree", state.Name, state.LocalPath);
+                    needsClone = true;
+                }
+            }
+
+            if (needsClone)
             {
                 _logger.LogInformation("Cloning repository {Name} from {Url} to {Path}", state.Name, state.RemoteUrl, state.LocalPath);
 
-                // Clean up any existing directory that's not a valid repository
+                // Clean up any existing directory
                 if (Directory.Exists(state.LocalPath))
                 {
-                    _logger.LogWarning("Removing invalid repository directory at {Path}", state.LocalPath);
+                    _logger.LogWarning("Removing existing repository directory at {Path}", state.LocalPath);
                     Directory.Delete(state.LocalPath, recursive: true);
                 }
 
@@ -124,8 +204,8 @@ public sealed class GitTrackerService : IDisposable
 
                 var cloneOptions = new CloneOptions
                 {
-                    IsBare = true, // Use bare repository to save space
-                    Checkout = false,
+                    IsBare = false, // Use working tree so MSBuildWorkspace can find .sln/.csproj files
+                    Checkout = true,
                     RecurseSubmodules = false
                 };
 
@@ -197,6 +277,20 @@ public sealed class GitTrackerService : IDisposable
             ?? throw new InvalidOperationException($"Branch {branchName} not found in repository {repoState.Name}");
 
         var currentSha = branch.Tip.Sha;
+
+        // Checkout/reset the working tree to the fetched commit so MSBuildWorkspace sees current sources
+        // This is critical - without this, the working tree stays at the initial clone commit
+        var checkoutOptions = new CheckoutOptions
+        {
+            CheckoutModifiers = CheckoutModifiers.Force
+        };
+
+        await Task.Run(() => Commands.Checkout(repo, branch, checkoutOptions), cancellationToken);
+        _logger.LogDebug("Checked out branch {Branch} at {Sha} in repository {Repo}", branchName, currentSha, repoState.Name);
+
+        // Clear workspace cache for this branch after updating the working tree
+        // This marks the cache entry as stale without disposing it (safe for concurrent indexing)
+        _workspaceLoader.ClearCache(repoState.LocalPath, branchName);
 
         var branchState = repoState.Branches.GetValueOrDefault(branchName);
         if (branchState == null)
@@ -666,6 +760,41 @@ public sealed class GitTrackerService : IDisposable
         }
 
         _logger.LogInformation("Loaded {Count} branch(es) from database for repository {Repo}", repoState.Branches.Count, repoState.Name);
+    }
+
+    /// <summary>
+    /// Gets commit metadata (author, message, date) from a specific commit.
+    /// </summary>
+    /// <param name="repositoryName">Repository name.</param>
+    /// <param name="commitSha">Commit SHA.</param>
+    /// <returns>Commit metadata, or null if commit not found.</returns>
+    public async Task<CommitMetadata?> GetCommitMetadataAsync(string repositoryName, string commitSha, CancellationToken cancellationToken = default)
+    {
+        if (!_repositories.TryGetValue(repositoryName, out var repoState))
+        {
+            throw new InvalidOperationException($"Repository {repositoryName} is not initialized");
+        }
+
+        return await Task.Run(() =>
+        {
+            using var repo = new GitRepository(repoState.LocalPath);
+
+            var commit = repo.Lookup<GitCommit>(commitSha);
+            if (commit == null)
+            {
+                _logger.LogWarning("Commit {Sha} not found in repository {Repo}", commitSha, repositoryName);
+                return null;
+            }
+
+            return new CommitMetadata
+            {
+                Sha = commit.Sha,
+                AuthorName = commit.Author.Name,
+                AuthorEmail = commit.Author.Email,
+                CommitMessage = commit.Message,
+                CommittedAt = commit.Author.When
+            };
+        }, cancellationToken);
     }
 
     /// <summary>

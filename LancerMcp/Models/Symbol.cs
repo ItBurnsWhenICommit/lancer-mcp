@@ -276,6 +276,11 @@ public sealed class ParsedFile
     public List<SymbolEdge> Edges { get; init; } = new();
 
     /// <summary>
+    /// Source text content of the file (cached to avoid re-reading from Git).
+    /// </summary>
+    public string? SourceText { get; set; }
+
+    /// <summary>
     /// Whether parsing was successful.
     /// </summary>
     public bool Success { get; init; }

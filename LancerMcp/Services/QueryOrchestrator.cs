@@ -18,20 +18,69 @@ public sealed class QueryOrchestrator
     private readonly EmbeddingService _embeddingService;
 
     // Intent detection patterns
+
+    /// <summary>
+    /// Pattern for Navigation queries - finding specific symbols or definitions
+    /// Examples: "find QueryOrchestrator", "show me the User class", "where is the login method"
+    /// </summary>
     private static readonly Regex NavigationPattern = new(
-        @"\b(find|show|where is|locate|go to|definition of|navigate to)\b",
+        @"\b(find|show|where is|locate|go to|jump to|open|view|display|get|lookup|navigate to|definition of|declaration of)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    /// <summary>
+    /// Pattern for Relations queries - finding relationships between symbols
+    /// Examples: "what calls X", "what does X call", "dependencies of X", "who uses X"
+    /// </summary>
     private static readonly Regex RelationsPattern = new(
-        @"\b(calls?|references?|uses?|depends? on|implements?|extends?|inherits?|call chain|callers?|callees?)\b",
+        @"\b(calls?|called by|references?|referenced by|uses?|used by|depends? on|dependen(ts?|cies)|implements?|implemented by|extends?|extended by|inherits?|inherited by|overrides?|overridden by|invokes?|invoked by|imports?|imported by|requires?|required by|call chain|callers?|callees?|subclasses?|superclasses?|children|parents|who (calls?|uses?|references?|depends on|implements?|extends?|inherits?))\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    /// <summary>
+    /// Pattern for Documentation queries - getting explanations or understanding code
+    /// Examples: "explain how X works", "what does X do", "tell me about X"
+    /// </summary>
     private static readonly Regex DocumentationPattern = new(
-        @"\b(what (is|does)|explain|describe|documentation|how (does|to)|purpose of)\b",
+        @"\b(what (is|does|are)|explain|describe|documentation|docs|how (does|do|to)|purpose of|why|tell me about|info about|information about|details about|overview of|summary of|understand|learn about)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    /// <summary>
+    /// Pattern for Examples queries - finding usage patterns or code samples
+    /// Examples: "show me how to use X", "example of X", "usage pattern for X"
+    /// </summary>
     private static readonly Regex ExamplesPattern = new(
-        @"\b(example|usage|how to use|sample|demo)\b",
+        @"\b(example|usage|how to use|sample|demo|show me how|tutorial|guide|pattern|best practice|snippet|code sample)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// Pattern for explicit Search queries - finding code by concept or functionality
+    /// Examples: "search for error handling", "find code that validates input", "implementation of authentication"
+    /// </summary>
+    private static readonly Regex SearchPattern = new(
+        @"\b(search|look for|find (code|logic|implementation|algorithm) (that|for|which)|code (that|for|which)|logic (that|for|which)|implementation of|algorithm for)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// Pattern to detect exact symbol names (PascalCase, camelCase, or specific class/method names)
+    /// Examples: "QueryOrchestrator", "getUserById", "IRepository"
+    /// </summary>
+    private static readonly Regex ExactSymbolPattern = new(
+        @"\b([A-Z][a-zA-Z0-9]*(?:\.[A-Z][a-zA-Z0-9]*)*)\b",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// Pattern to detect conceptual/descriptive queries (multiple common programming terms)
+    /// Examples: "error handling code", "database connection logic", "authentication service"
+    /// </summary>
+    private static readonly Regex ConceptualPattern = new(
+        @"\b(code|logic|handling|handler|manager|service|utility|helper|function|method|class|interface|struct|enum|type|component|module|package|library|framework|pattern|strategy|factory|builder|adapter|decorator|proxy|singleton|observer|command|state|template|visitor|chain|mediator|memento|prototype|bridge|composite|facade|flyweight|interpreter|iterator|algorithm|implementation|validation|authentication|authorization|configuration|initialization|setup|cleanup|processing|parsing|formatting|serialization|deserialization|encoding|decoding|encryption|decryption|compression|decompression|caching|logging|monitoring|tracing|debugging|testing|mocking|stubbing|assertion|verification)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// Pattern to detect file-based queries
+    /// Examples: "files in src/", "code in controllers/", "*.cs files"
+    /// </summary>
+    private static readonly Regex FilePattern = new(
+        @"(files? (in|under|within)|\.([a-z]{1,4})\s|/[a-zA-Z0-9_\-/]+/)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public QueryOrchestrator(
@@ -52,22 +101,28 @@ public sealed class QueryOrchestrator
 
     /// <summary>
     /// Execute a query and return ranked results.
+    /// Repository parameter is required - multi-repo queries are not supported.
     /// </summary>
     public async Task<QueryResponse> QueryAsync(
         string query,
-        string? repositoryName = null,
+        string repositoryName,
         string? branchName = null,
         Language? language = null,
         int maxResults = 50,
         CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(repositoryName))
+        {
+            throw new ArgumentException("Repository name is required. Multi-repo queries are not supported.", nameof(repositoryName));
+        }
+
         var stopwatch = Stopwatch.StartNew();
 
         try
         {
             // Step 1: Parse and analyze the query
             var parsedQuery = ParseQuery(query, repositoryName, branchName, language, maxResults);
-            _logger.LogInformation("Query intent detected: {Intent}", parsedQuery.Intent);
+            _logger.LogInformation("Query intent detected: {Intent} for repository: {Repository}", parsedQuery.Intent, repositoryName);
 
             // Step 2: Execute search based on intent
             var results = await ExecuteSearchAsync(parsedQuery, cancellationToken);
@@ -94,7 +149,7 @@ public sealed class QueryOrchestrator
                 Metadata = new Dictionary<string, object>
                 {
                     ["keywords"] = parsedQuery.Keywords,
-                    ["repository"] = repositoryName ?? "all",
+                    ["repository"] = repositoryName,
                     ["branch"] = branchName ?? "all"
                 }
             };
@@ -111,7 +166,7 @@ public sealed class QueryOrchestrator
     /// </summary>
     private ParsedQuery ParseQuery(
         string query,
-        string? repositoryName,
+        string repositoryName,
         string? branchName,
         Language? language,
         int maxResults)
@@ -149,22 +204,58 @@ public sealed class QueryOrchestrator
     }
 
     /// <summary>
-    /// Detect the intent of the query.
+    /// Detect the intent of the query with improved heuristics.
+    /// Order matters: check more specific patterns first to avoid false positives.
     /// </summary>
     private QueryIntent DetectIntent(string query)
     {
-        if (NavigationPattern.IsMatch(query))
-            return QueryIntent.Navigation;
-
+        // 1. Check for Relations intent first (most specific patterns)
+        // Examples: "what calls X", "dependencies of Y", "who uses Z"
         if (RelationsPattern.IsMatch(query))
             return QueryIntent.Relations;
 
+        // 2. Check for Documentation intent
+        // Examples: "explain how X works", "what does Y do", "tell me about Z"
         if (DocumentationPattern.IsMatch(query))
             return QueryIntent.Documentation;
 
+        // 3. Check for Examples intent
+        // Examples: "show me how to use X", "example of Y", "usage pattern for Z"
         if (ExamplesPattern.IsMatch(query))
             return QueryIntent.Examples;
 
+        // 4. Check for explicit Search patterns
+        // Examples: "search for error handling", "find code that validates input"
+        if (SearchPattern.IsMatch(query))
+            return QueryIntent.Search;
+
+        // 5. Improved Navigation vs Search detection
+        // Navigation: "find QueryOrchestrator class" (exact symbol)
+        // Search: "find error handling code" (conceptual)
+        if (NavigationPattern.IsMatch(query))
+        {
+            var hasExactSymbol = ExactSymbolPattern.IsMatch(query);
+            var hasConceptualTerms = ConceptualPattern.Matches(query).Count >= 2;
+
+            // If query has conceptual terms but no clear exact symbol, treat as Search
+            if (hasConceptualTerms && !hasExactSymbol)
+                return QueryIntent.Search;
+
+            // If query has exact symbol name, treat as Navigation
+            if (hasExactSymbol)
+                return QueryIntent.Navigation;
+
+            // Default to Navigation for "find X" patterns
+            return QueryIntent.Navigation;
+        }
+
+        // 6. Check if query is file-based
+        // Examples: "files in src/", "*.cs files"
+        if (FilePattern.IsMatch(query))
+            return QueryIntent.Search;
+
+        // 7. Default to Search for everything else
+        // This handles general queries like "authentication", "database connection", etc.
         return QueryIntent.Search;
     }
 
@@ -224,19 +315,37 @@ public sealed class QueryOrchestrator
     }
 
     /// <summary>
-    /// Execute the search based on parsed query.
+    /// Execute the search based on parsed query with fallback mechanism.
     /// </summary>
     private async Task<List<SearchResult>> ExecuteSearchAsync(
         ParsedQuery parsedQuery,
         CancellationToken cancellationToken)
     {
+        List<SearchResult> results;
+
         switch (parsedQuery.Intent)
         {
             case QueryIntent.Navigation:
-                return await ExecuteNavigationSearchAsync(parsedQuery, cancellationToken);
+                results = await ExecuteNavigationSearchAsync(parsedQuery, cancellationToken);
+
+                // Fallback: If Navigation returns 0 results, try hybrid search
+                if (!results.Any())
+                {
+                    _logger.LogInformation("Navigation search returned 0 results, falling back to hybrid search");
+                    results = await ExecuteHybridSearchAsync(parsedQuery, cancellationToken);
+                }
+                return results;
 
             case QueryIntent.Relations:
-                return await ExecuteRelationsSearchAsync(parsedQuery, cancellationToken);
+                results = await ExecuteRelationsSearchAsync(parsedQuery, cancellationToken);
+
+                // Fallback: If Relations returns 0 results, try hybrid search
+                if (!results.Any())
+                {
+                    _logger.LogInformation("Relations search returned 0 results, falling back to hybrid search");
+                    results = await ExecuteHybridSearchAsync(parsedQuery, cancellationToken);
+                }
+                return results;
 
             case QueryIntent.Documentation:
             case QueryIntent.Examples:
@@ -264,6 +373,7 @@ public sealed class QueryOrchestrator
                 var symbols = await _symbolRepository.SearchByNameAsync(
                     parsedQuery.RepositoryName ?? string.Empty,
                     symbolName,
+                    parsedQuery.BranchName,
                     fuzzy: true,
                     limit: parsedQuery.MaxResults,
                     cancellationToken);
@@ -302,6 +412,7 @@ public sealed class QueryOrchestrator
             var symbols = await _symbolRepository.SearchByNameAsync(
                 parsedQuery.RepositoryName ?? string.Empty,
                 query,
+                parsedQuery.BranchName,
                 fuzzy: true,
                 limit: parsedQuery.MaxResults,
                 cancellationToken);
@@ -345,6 +456,9 @@ public sealed class QueryOrchestrator
         var results = new List<SearchResult>();
         var seenSymbolIds = new HashSet<string>(); // Track seen symbols to avoid duplicates
 
+        // Detect query direction: "what calls X" vs "what does X call"
+        var isIncomingQuery = DetectIncomingRelationQuery(parsedQuery.OriginalQuery);
+
         // First, find the symbols mentioned in the query
         if (parsedQuery.SymbolNames?.Any() == true)
         {
@@ -353,6 +467,7 @@ public sealed class QueryOrchestrator
                 var symbols = await _symbolRepository.SearchByNameAsync(
                     parsedQuery.RepositoryName ?? string.Empty,
                     symbolName,
+                    parsedQuery.BranchName,
                     fuzzy: true,
                     limit: 5,
                     cancellationToken);
@@ -397,36 +512,201 @@ public sealed class QueryOrchestrator
                                 Id = sourceSymbol.Id,
                                 Name = sourceSymbol.Name,
                                 Kind = sourceSymbol.Kind,
-                                RelationType = $"referenced_by_{edge.Kind}",
+                                RelationType = $"CalledBy_{edge.Kind}",
                                 FilePath = sourceSymbol.FilePath,
                                 Line = sourceSymbol.StartLine
                             });
                         }
                     }
 
-                    results.Add(new SearchResult
+                    // If this is an incoming query (what calls X), promote callers to primary results
+                    if (isIncomingQuery && incomingEdges.Any())
                     {
-                        Id = symbol.Id,
-                        Type = "symbol_with_relations",
-                        Repository = symbol.RepositoryName,
-                        Branch = symbol.BranchName,
-                        FilePath = symbol.FilePath,
-                        Language = symbol.Language,
-                        SymbolName = symbol.Name,
-                        SymbolKind = symbol.Kind,
-                        Content = symbol.Signature ?? $"{symbol.Kind} {symbol.Name}",
-                        StartLine = symbol.StartLine,
-                        EndLine = symbol.EndLine,
-                        Score = 1.0f,
-                        Signature = symbol.Signature,
-                        Documentation = symbol.Documentation,
-                        RelatedSymbols = relatedSymbols
-                    });
+                        // Add the target symbol first as context
+                        results.Add(new SearchResult
+                        {
+                            Id = symbol.Id,
+                            Type = "symbol_with_relations",
+                            Repository = symbol.RepositoryName,
+                            Branch = symbol.BranchName,
+                            FilePath = symbol.FilePath,
+                            Language = symbol.Language,
+                            SymbolName = symbol.Name,
+                            SymbolKind = symbol.Kind,
+                            Content = symbol.Signature ?? $"{symbol.Kind} {symbol.Name}",
+                            StartLine = symbol.StartLine,
+                            EndLine = symbol.EndLine,
+                            Score = 1.0f,
+                            Signature = symbol.Signature,
+                            Documentation = symbol.Documentation,
+                            RelatedSymbols = relatedSymbols
+                        });
+
+                        // Then add each caller as a primary result
+                        foreach (var edge in incomingEdges.Take(20))
+                        {
+                            var sourceSymbol = await _symbolRepository.GetByIdAsync(edge.SourceSymbolId, cancellationToken);
+                            if (sourceSymbol != null && seenSymbolIds.Add(sourceSymbol.Id))
+                            {
+                                results.Add(new SearchResult
+                                {
+                                    Id = sourceSymbol.Id,
+                                    Type = "caller",
+                                    Repository = sourceSymbol.RepositoryName,
+                                    Branch = sourceSymbol.BranchName,
+                                    FilePath = sourceSymbol.FilePath,
+                                    Language = sourceSymbol.Language,
+                                    SymbolName = sourceSymbol.Name,
+                                    SymbolKind = sourceSymbol.Kind,
+                                    Content = sourceSymbol.Signature ?? $"{sourceSymbol.Kind} {sourceSymbol.Name}",
+                                    StartLine = sourceSymbol.StartLine,
+                                    EndLine = sourceSymbol.EndLine,
+                                    Score = 0.9f,
+                                    Signature = sourceSymbol.Signature,
+                                    Documentation = sourceSymbol.Documentation,
+                                    RelatedSymbols = new List<RelatedSymbol>
+                                    {
+                                        new RelatedSymbol
+                                        {
+                                            Id = symbol.Id,
+                                            Name = symbol.Name,
+                                            Kind = symbol.Kind,
+                                            RelationType = edge.Kind.ToString(),
+                                            FilePath = symbol.FilePath,
+                                            Line = symbol.StartLine
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // Default behavior: return the symbol with its relationships
+                        results.Add(new SearchResult
+                        {
+                            Id = symbol.Id,
+                            Type = "symbol_with_relations",
+                            Repository = symbol.RepositoryName,
+                            Branch = symbol.BranchName,
+                            FilePath = symbol.FilePath,
+                            Language = symbol.Language,
+                            SymbolName = symbol.Name,
+                            SymbolKind = symbol.Kind,
+                            Content = symbol.Signature ?? $"{symbol.Kind} {symbol.Name}",
+                            StartLine = symbol.StartLine,
+                            EndLine = symbol.EndLine,
+                            Score = 1.0f,
+                            Signature = symbol.Signature,
+                            Documentation = symbol.Documentation,
+                            RelatedSymbols = relatedSymbols
+                        });
+                    }
                 }
             }
         }
 
+        // Optionally enrich with semantic context if we have results
+        if (results.Any() && parsedQuery.IncludeRelated)
+        {
+            results = await EnrichRelationsWithSemanticContextAsync(results, parsedQuery, cancellationToken);
+        }
+
         return results;
+    }
+
+    /// <summary>
+    /// Enrich relation results with semantic context from hybrid search.
+    /// This adds related code chunks that provide context around the relationships.
+    /// </summary>
+    private async Task<List<SearchResult>> EnrichRelationsWithSemanticContextAsync(
+        List<SearchResult> relationResults,
+        ParsedQuery parsedQuery,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Build a query from the original query to find semantic context
+            // For example, "what calls QueryAsync" -> find code chunks about QueryAsync
+            var contextQuery = string.Join(" ", parsedQuery.Keywords);
+
+            // Get a few semantic results for context (limit to 5 to avoid overwhelming)
+            var contextParsedQuery = new ParsedQuery
+            {
+                OriginalQuery = contextQuery,
+                Intent = QueryIntent.Search,
+                Keywords = parsedQuery.Keywords,
+                SymbolNames = parsedQuery.SymbolNames,
+                FilePaths = parsedQuery.FilePaths,
+                Language = parsedQuery.Language,
+                RepositoryName = parsedQuery.RepositoryName,
+                BranchName = parsedQuery.BranchName,
+                IncludeRelated = false,
+                MaxResults = 5
+            };
+
+            var contextResults = await ExecuteHybridSearchAsync(contextParsedQuery, cancellationToken);
+
+            // Filter out context results that are already in the relation results
+            var relationSymbolIds = new HashSet<string>(relationResults.Select(r => r.Id));
+            var uniqueContextResults = contextResults
+                .Where(cr => !relationSymbolIds.Contains(cr.Id))
+                .Take(3) // Only add top 3 context results
+                .Select(cr => new SearchResult
+                {
+                    Id = cr.Id,
+                    Type = "semantic_context",
+                    Repository = cr.Repository,
+                    Branch = cr.Branch,
+                    FilePath = cr.FilePath,
+                    Language = cr.Language,
+                    SymbolName = cr.SymbolName,
+                    SymbolKind = cr.SymbolKind,
+                    Content = cr.Content,
+                    StartLine = cr.StartLine,
+                    EndLine = cr.EndLine,
+                    Score = cr.Score * 0.5f, // Lower score to indicate it's context, not primary result
+                    BM25Score = cr.BM25Score,
+                    VectorScore = cr.VectorScore,
+                    Signature = cr.Signature,
+                    Documentation = cr.Documentation
+                })
+                .ToList();
+
+            // Append context results after the primary relation results
+            if (uniqueContextResults.Any())
+            {
+                _logger.LogInformation("Added {Count} semantic context results to relations query", uniqueContextResults.Count);
+                relationResults.AddRange(uniqueContextResults);
+            }
+
+            return relationResults;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to enrich relations with semantic context, returning original results");
+            return relationResults;
+        }
+    }
+
+    /// <summary>
+    /// Detect if the query is asking for incoming relationships (what calls/uses X).
+    /// </summary>
+    private bool DetectIncomingRelationQuery(string query)
+    {
+        var lowerQuery = query.ToLowerInvariant();
+
+        // Patterns that indicate incoming relationships (what calls/uses/references this)
+        var incomingPatterns = new[]
+        {
+            @"\bwhat\s+(calls?|uses?|references?|depends?\s+on)\b",
+            @"\b(callers?|usages?|references?)\s+of\b",
+            @"\bwho\s+(calls?|uses?|references?)\b",
+            @"\bfind\s+(callers?|usages?|references?)\b",
+            @"\bshow\s+(callers?|usages?|references?)\b"
+        };
+
+        return incomingPatterns.Any(pattern => Regex.IsMatch(lowerQuery, pattern));
     }
 
     /// <summary>
@@ -527,8 +807,9 @@ public sealed class QueryOrchestrator
     {
         var results = new List<SearchResult>();
 
+        // Repository name is guaranteed to be non-null by QueryAsync validation
         var chunks = await _chunkRepository.SearchFullTextAsync(
-            repoId: parsedQuery.RepositoryName ?? string.Empty,
+            repoId: parsedQuery.RepositoryName!,
             query: parsedQuery.OriginalQuery,
             branchName: parsedQuery.BranchName,
             language: parsedQuery.Language,
@@ -587,6 +868,7 @@ public sealed class QueryOrchestrator
             var symbols = await _symbolRepository.SearchByNameAsync(
                 result.Repository,
                 result.SymbolName,
+                result.Branch,
                 fuzzy: false,
                 limit: 1,
                 cancellationToken);

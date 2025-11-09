@@ -99,6 +99,11 @@ public sealed class CodeChunkRepository : ICodeChunkRepository
 
     public async Task<IEnumerable<CodeChunk>> SearchFullTextAsync(string repoId, string query, string? branchName = null, Language? language = null, int limit = 50, CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(repoId))
+        {
+            throw new ArgumentException("Repository ID is required. Multi-repo queries are not supported.", nameof(repoId));
+        }
+
         var sql = @"
             SELECT id, repo_id AS RepositoryName, branch_name AS BranchName, commit_sha AS CommitSha,
                    file_path AS FilePath, symbol_id AS SymbolId, symbol_name AS SymbolName,

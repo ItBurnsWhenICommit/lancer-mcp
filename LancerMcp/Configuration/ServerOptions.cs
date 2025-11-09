@@ -9,7 +9,7 @@ public sealed class ServerOptions
     /// <summary>
     /// Root directory where remote repositories are cloned and indexed.
     /// </summary>
-    public string WorkingDirectory { get; set; } = Path.Combine(AppContext.BaseDirectory, "repositories");
+    public string WorkingDirectory { get; set; } = Path.Combine(Path.GetTempPath(), "lancer-mcp-repositories");
 
     /// <summary>
     /// Repositories that can be mirrored and indexed by this server.

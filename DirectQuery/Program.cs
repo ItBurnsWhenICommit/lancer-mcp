@@ -71,6 +71,11 @@ class Program
             );
 
             // Create repositories (DatabaseService first, then Logger)
+            var repositoryRepository = new RepositoryRepository(
+                databaseService,
+                loggerFactory.CreateLogger<RepositoryRepository>()
+            );
+
             var symbolRepository = new SymbolRepository(
                 databaseService,
                 loggerFactory.CreateLogger<SymbolRepository>()
@@ -116,6 +121,18 @@ class Program
 
             WriteSuccess("Services initialized");
             Console.WriteLine();
+
+            // Get repository to determine default branch
+            var repo = await repositoryRepository.GetByNameAsync(repository, CancellationToken.None);
+            if (repo == null)
+            {
+                WriteError($"Repository '{repository}' not found in database");
+                return 1;
+            }
+
+            var branchName = repo.DefaultBranch;
+            WriteInfo($"Using branch: {branchName}");
+            Console.WriteLine();
             WriteInfo("Executing query...");
             Console.WriteLine();
 
@@ -123,17 +140,17 @@ class Program
             var response = await queryOrchestrator.QueryAsync(
                 query,
                 repository,
-                branchName: null,
+                branchName: branchName,
                 maxResults: maxResults,
                 cancellationToken: CancellationToken.None
             );
 
-            // Output raw JSON response (what MCP server would send)
+            // Output optimized JSON response (what MCP server would send)
             Console.WriteLine();
             WriteSuccess("Query completed successfully");
             Console.WriteLine();
-            WriteInfo("Raw JSON Response:");
-            Console.WriteLine("==================");
+            WriteInfo("Optimized JSON Response:");
+            Console.WriteLine("========================");
             Console.WriteLine();
 
             var jsonOptions = new JsonSerializerOptions
@@ -142,7 +159,9 @@ class Program
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase
             };
 
-            var json = JsonSerializer.Serialize(response, jsonOptions);
+            // Use the same optimized format as the MCP tool
+            var optimizedResponse = response.ToOptimizedFormat();
+            var json = JsonSerializer.Serialize(optimizedResponse, jsonOptions);
             Console.WriteLine(json);
             Console.WriteLine();
 

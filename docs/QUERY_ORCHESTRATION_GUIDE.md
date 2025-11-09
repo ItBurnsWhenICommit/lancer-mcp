@@ -34,7 +34,7 @@ The parser extracts:
 - **Symbol Names** - CamelCase or snake_case identifiers
 - **File Paths** - Paths like `src/Program.cs`
 - **Language Filter** - If specified
-- **Repository/Branch Filter** - If specified
+- **Branch Filter** - If specified
 
 ### 3. Search Execution
 
@@ -71,13 +71,16 @@ finalScore = originalScore * 0.7 + graphScore * 0.3
 
 ### 5. Result Formatting
 
-Results include:
-- **Code Content** - The actual code
-- **Location** - File path, line numbers
-- **Metadata** - Symbol name, kind, language
-- **Scores** - Overall score, BM25, vector, graph components
-- **Context** - Signature, documentation
-- **Related Symbols** - For relation queries
+Results are optimized for AI consumption with minimal payload size:
+- **Location** - `file` (path), `lines` (range like "56-107")
+- **Score** - Overall relevance score (0.0-1.0)
+- **Type** - Result type (e.g., "symbol", "caller", "code_chunk")
+- **Symbol Info** - `symbol` (name), `kind` (e.g., "Method", "Class") - only if present
+- **Code** - `sig` (signature) or `content` (code snippet) - only if present
+- **Documentation** - `docs` - only if present
+- **Related Symbols** - `related` array - only for relation queries
+
+**Note**: Repository and branch are at the top level only, not duplicated per result.
 
 ## Usage Examples
 
@@ -96,23 +99,23 @@ Results include:
 **Response:**
 ```json
 {
+  "repo": "my-app",
+  "branch": "main",
   "query": "authentication login",
   "intent": "Search",
-  "totalResults": 42,
-  "executionTimeMs": 156,
+  "total": 42,
   "results": [
     {
-      "type": "code_chunk",
-      "filePath": "src/Services/AuthService.cs",
-      "symbolName": "Login",
-      "symbolKind": "Method",
-      "content": "public async Task<LoginResult> Login(string username, string password) { ... }",
+      "file": "src/Services/AuthService.cs",
+      "lines": "45-52",
       "score": 0.92,
-      "bm25Score": 0.85,
-      "vectorScore": 0.95
+      "type": "code_chunk",
+      "symbol": "Login",
+      "kind": "Method",
+      "sig": "public async Task<LoginResult> Login(string username, string password)"
     }
   ],
-  "suggestedQueries": [
+  "suggestions": [
     "Show me how Login is used",
     "What calls Login?",
     "Find similar code to Login"
@@ -135,19 +138,20 @@ Results include:
 **Response:**
 ```json
 {
+  "repo": "my-app",
+  "branch": "main",
   "query": "where is the UserService class?",
   "intent": "Navigation",
-  "totalResults": 1,
+  "total": 1,
   "results": [
     {
+      "file": "src/Services/UserService.cs",
+      "lines": "10-150",
+      "score": 1.0,
       "type": "symbol",
-      "filePath": "src/Services/UserService.cs",
-      "symbolName": "UserService",
-      "symbolKind": "Class",
-      "signature": "public class UserService : IUserService",
-      "startLine": 10,
-      "endLine": 150,
-      "score": 1.0
+      "symbol": "UserService",
+      "kind": "Class",
+      "sig": "public class UserService : IUserService"
     }
   ]
 }
@@ -168,26 +172,33 @@ Results include:
 **Response:**
 ```json
 {
+  "repo": "my-app",
+  "branch": "main",
   "query": "what calls the Login method?",
   "intent": "Relations",
-  "totalResults": 1,
+  "total": 1,
   "results": [
     {
+      "file": "src/Services/AuthService.cs",
+      "lines": "45-52",
+      "score": 0.95,
       "type": "symbol_with_relations",
-      "symbolName": "Login",
-      "relatedSymbols": [
+      "symbol": "Login",
+      "kind": "Method",
+      "sig": "public async Task<LoginResult> Login(string username, string password)",
+      "related": [
         {
           "name": "LoginController.Post",
           "kind": "Method",
-          "relationType": "referenced_by_Call",
-          "filePath": "src/Controllers/LoginController.cs",
+          "rel": "referenced_by_Call",
+          "file": "src/Controllers/LoginController.cs",
           "line": 25
         },
         {
           "name": "AuthenticationTests.TestLogin",
           "kind": "Method",
-          "relationType": "referenced_by_Call",
-          "filePath": "tests/AuthenticationTests.cs",
+          "rel": "referenced_by_Call",
+          "file": "tests/AuthenticationTests.cs",
           "line": 42
         }
       ]
@@ -299,20 +310,6 @@ Add custom patterns in `QueryOrchestrator.cs`:
 private static readonly Regex CustomPattern = new(
     @"\b(your|custom|pattern)\b",
     RegexOptions.IgnoreCase | RegexOptions.Compiled);
-```
-
-### Multi-Repository Search
-
-Pass `null` for `repositoryName` to search across all repositories:
-
-```csharp
-var response = await _queryOrchestrator.QueryAsync(
-    query: "authentication",
-    repositoryName: null,  // Search all repos
-    branchName: null,
-    language: null,
-    maxResults: 50,
-    cancellationToken);
 ```
 
 ### Language Filtering

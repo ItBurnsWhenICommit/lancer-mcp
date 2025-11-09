@@ -17,7 +17,7 @@ public sealed class BasicParserService
     }
 
     /// <summary>
-    /// Parses a file using basic regex patterns.
+    /// Parses a file using basic regex patterns with explicit language.
     /// </summary>
     public Task<ParsedFile> ParseFileAsync(
         string repositoryName,
@@ -393,4 +393,3 @@ public sealed class BasicParserService
         }
     }
 }
-

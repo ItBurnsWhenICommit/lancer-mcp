@@ -45,6 +45,31 @@ run_test() {
     fi
 }
 
+# Test that expects at least one row to be returned
+run_test_expect_rows() {
+    local test_name=$1
+    local query=$2
+
+    echo -n "Testing $test_name... "
+
+    local result=$(docker exec $CONTAINER_NAME psql -U $DB_USER -d $DB_NAME -t -c "$query" 2>&1)
+    local exit_code=$?
+
+    if [ $exit_code -ne 0 ]; then
+        print_error "$test_name (query failed)"
+        return 1
+    fi
+
+    # Check if result is empty (no rows returned)
+    if [ -z "$(echo "$result" | tr -d '[:space:]')" ]; then
+        print_error "$test_name (no rows returned)"
+        return 1
+    fi
+
+    print_success "$test_name"
+    return 0
+}
+
 echo "============================================================================"
 echo "PostgreSQL Database Setup Test (Docker)"
 echo "============================================================================"
@@ -123,10 +148,11 @@ run_test "indexing_progress view" "SELECT COUNT(*) FROM indexing_progress;"
 
 # Test 7: Indexes
 print_info "Testing indexes..."
-run_test "HNSW index on embeddings" "SELECT indexname FROM pg_indexes WHERE indexname = 'idx_embeddings_vector_hnsw';"
-run_test "FTS index on code_chunks" "SELECT indexname FROM pg_indexes WHERE indexname = 'idx_chunks_content_fts';"
-run_test "Trigram index on files" "SELECT indexname FROM pg_indexes WHERE indexname = 'idx_files_file_path_trgm';"
-run_test "Trigram index on symbols" "SELECT indexname FROM pg_indexes WHERE indexname = 'idx_symbols_name_trgm';"
+run_test_expect_rows "HNSW index on embeddings" "SELECT indexname FROM pg_indexes WHERE indexname = 'idx_embeddings_vector_hnsw';"
+run_test_expect_rows "FTS index on code_chunks" "SELECT indexname FROM pg_indexes WHERE indexname = 'idx_chunks_content_fts';"
+run_test_expect_rows "Trigram index on files" "SELECT indexname FROM pg_indexes WHERE indexname = 'idx_files_file_path_trgm';"
+run_test_expect_rows "Trigram index on symbols" "SELECT indexname FROM pg_indexes WHERE indexname = 'idx_symbols_name_trgm';"
+run_test_expect_rows "Functional index on qualified_name" "SELECT indexname FROM pg_indexes WHERE indexname = 'idx_symbols_qualified_name_lower';"
 
 echo ""
 echo "============================================================================"

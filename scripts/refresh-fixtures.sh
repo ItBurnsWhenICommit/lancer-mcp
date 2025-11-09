@@ -107,6 +107,7 @@ docker compose exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" < schema/02_tab
 docker compose exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" < schema/03_chunks_embeddings.sql
 docker compose exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" < schema/04_functions.sql
 docker compose exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" < schema/05_materialized_views.sql
+docker compose exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" < schema/06_performance_indexes.sql
 
 log_info "✓ Database schema initialized"
 
@@ -131,6 +132,9 @@ log_warn "       \"RemoteUrl\": \"file://$REPOS_DIR/Pulsar4x.git\","
 log_warn "       \"DefaultBranch\": \"master\""
 log_warn "     }"
 log_warn "   ]"
+log_warn ""
+log_warn "   NOTE: Both repositories are cloned by this script. You can index just"
+log_warn "   lancer-mcp for basic testing, or include Pulsar4x for scalability tests."
 log_warn ""
 log_warn "2. Start the MCP server:"
 log_warn "   dotnet run --project LancerMcp/LancerMcp.csproj -c Release"

@@ -61,8 +61,13 @@ public sealed class SymbolRepository : ISymbolRepository
         return await _db.QueryAsync<Symbol>(sql, new { RepoId = repoId, BranchName = branchName }, cancellationToken);
     }
 
-    public async Task<IEnumerable<Symbol>> SearchByNameAsync(string repoId, string query, bool fuzzy = false, int limit = 50, CancellationToken cancellationToken = default)
+    public async Task<IEnumerable<Symbol>> SearchByNameAsync(string repoId, string query, string? branchName = null, bool fuzzy = false, int limit = 50, CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(repoId))
+        {
+            throw new ArgumentException("Repository ID is required. Multi-repo queries are not supported.", nameof(repoId));
+        }
+
         string sql;
         if (fuzzy)
         {
@@ -74,7 +79,9 @@ public sealed class SymbolRepository : ISymbolRepository
                        end_column AS EndColumn, signature, documentation, modifiers,
                        parent_symbol_id AS ParentSymbolId, indexed_at AS IndexedAt
                 FROM symbols
-                WHERE repo_id = @RepoId AND (name % @Query OR qualified_name % @Query)
+                WHERE repo_id = @RepoId
+                  AND (@BranchName IS NULL OR branch_name = @BranchName)
+                  AND (name % @Query OR qualified_name % @Query)
                 ORDER BY GREATEST(similarity(name, @Query), similarity(COALESCE(qualified_name, ''), @Query)) DESC
                 LIMIT @Limit";
         }
@@ -88,12 +95,14 @@ public sealed class SymbolRepository : ISymbolRepository
                        end_column AS EndColumn, signature, documentation, modifiers,
                        parent_symbol_id AS ParentSymbolId, indexed_at AS IndexedAt
                 FROM symbols
-                WHERE repo_id = @RepoId AND (name ILIKE @Query || '%' OR qualified_name ILIKE @Query || '%')
+                WHERE repo_id = @RepoId
+                  AND (@BranchName IS NULL OR branch_name = @BranchName)
+                  AND (name ILIKE @Query || '%' OR qualified_name ILIKE @Query || '%')
                 ORDER BY name
                 LIMIT @Limit";
         }
 
-        return await _db.QueryAsync<Symbol>(sql, new { RepoId = repoId, Query = query, Limit = limit }, cancellationToken);
+        return await _db.QueryAsync<Symbol>(sql, new { RepoId = repoId, BranchName = branchName, Query = query, Limit = limit }, cancellationToken);
     }
 
     public async Task<IEnumerable<Symbol>> GetByKindAsync(string repoId, SymbolKind kind, int limit = 100, CancellationToken cancellationToken = default)
