@@ -6,6 +6,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LancerMcp", "LancerMcp\Lanc
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LancerMcp.Tests", "LancerMcp.Tests\LancerMcp.Tests.csproj", "{BC323B8A-2C9F-4623-90EC-CE378AAF6FEB}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LancerMcp.Benchmark", "LancerMcp.Benchmark\LancerMcp.Benchmark.csproj", "{62150DCB-790B-426B-A1C4-BFC637A759E3}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -20,6 +22,10 @@ Global
 		{BC323B8A-2C9F-4623-90EC-CE378AAF6FEB}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{BC323B8A-2C9F-4623-90EC-CE378AAF6FEB}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{BC323B8A-2C9F-4623-90EC-CE378AAF6FEB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{62150DCB-790B-426B-A1C4-BFC637A759E3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{62150DCB-790B-426B-A1C4-BFC637A759E3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{62150DCB-790B-426B-A1C4-BFC637A759E3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{62150DCB-790B-426B-A1C4-BFC637A759E3}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
