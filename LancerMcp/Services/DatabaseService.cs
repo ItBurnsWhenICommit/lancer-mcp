@@ -218,7 +218,10 @@ public class VectorTypeHandler : SqlMapper.TypeHandler<Vector>
         if (parameter is NpgsqlParameter npgsqlParameter)
         {
             npgsqlParameter.Value = value ?? (object)DBNull.Value;
-            npgsqlParameter.NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Unknown;
+            if (value != null)
+            {
+                npgsqlParameter.DataTypeName = "vector";
+            }
         }
     }
 
@@ -238,4 +241,3 @@ public class VectorTypeHandler : SqlMapper.TypeHandler<Vector>
         throw new InvalidCastException($"Cannot convert {value.GetType()} to Vector");
     }
 }
-

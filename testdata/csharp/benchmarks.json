@@ -1,0 +1,11 @@
+{
+  "name": "csharp-minimal",
+  "topK": 5,
+  "queries": [
+    { "query": "find UserService class", "expectedSymbols": ["UserService"] },
+    { "query": "show IUserStore interface", "expectedSymbols": ["IUserStore"] },
+    { "query": "where is Login method", "expectedSymbols": ["Login"] },
+    { "query": "find HashPassword method", "expectedSymbols": ["HashPassword"] },
+    { "query": "find PasswordPolicy", "expectedSymbols": ["PasswordPolicy"] }
+  ]
+}

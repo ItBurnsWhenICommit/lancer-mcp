@@ -5,6 +5,7 @@ obj/
 # Runtime data directories
 repositories/
 embedding-data/
+.worktrees/
 
 # Temporary test directories
 /tmp/lancer-test-*/

@@ -1,7 +1,10 @@
 using System.ComponentModel;
 using System.Text.Json;
 using ModelContextProtocol.Server;
+using LancerMcp.Configuration;
+using LancerMcp.Models;
 using LancerMcp.Services;
+using Microsoft.Extensions.Options;
 
 namespace LancerMcp.Tools;
 
@@ -15,17 +18,20 @@ public sealed class CodeIndexTool
     private readonly GitTrackerService _gitTracker;
     private readonly IndexingService _indexingService;
     private readonly QueryOrchestrator _queryOrchestrator;
+    private readonly IOptionsMonitor<ServerOptions> _options;
     private readonly ILogger<CodeIndexTool> _logger;
 
     public CodeIndexTool(
         GitTrackerService gitTracker,
         IndexingService indexingService,
         QueryOrchestrator queryOrchestrator,
+        IOptionsMonitor<ServerOptions> options,
         ILogger<CodeIndexTool> logger)
     {
         _gitTracker = gitTracker;
         _indexingService = indexingService;
         _queryOrchestrator = queryOrchestrator;
+        _options = options;
         _logger = logger;
     }
 
@@ -128,10 +134,15 @@ public sealed class CodeIndexTool
                 maxResults: maxResults ?? 50,
                 cancellationToken: cancellationToken);
 
-            // Use the optimized format from QueryResponse
-            var optimizedResult = queryResponse.ToOptimizedFormat();
+            var responseOptions = _options.CurrentValue;
+            var optimizedResult = queryResponse.ToOptimizedFormat(new QueryResponseCompactionOptions
+            {
+                MaxResults = responseOptions.MaxResponseResults,
+                MaxSnippetChars = responseOptions.MaxResponseSnippetChars,
+                MaxJsonBytes = responseOptions.MaxResponseBytes
+            });
 
-            return JsonSerializer.Serialize(optimizedResult, new JsonSerializerOptions { WriteIndented = true });
+            return JsonSerializer.Serialize(optimizedResult);
         }
         catch (Exception ex)
         {
@@ -145,7 +156,7 @@ public sealed class CodeIndexTool
                 errorType = ex.GetType().Name
             };
 
-            return JsonSerializer.Serialize(errorResult, new JsonSerializerOptions { WriteIndented = true });
+            return JsonSerializer.Serialize(errorResult);
         }
     }
 }
