@@ -286,7 +286,7 @@ public class QueryOrchestratorEndToEndTests : FixtureTestBase
         var query = "test query";
 
         // Act
-        var response = await _queryOrchestrator.QueryAsync(query, maxResults: 10);
+        var response = await _queryOrchestrator.QueryAsync(query, repositoryName: "lancer-mcp", maxResults: 10);
 
         // Assert
         response.Should().NotBeNull();
@@ -321,9 +321,9 @@ public class QueryOrchestratorEndToEndTests : FixtureTestBase
         response.Should().NotBeNull();
         response.SuggestedQueries.Should().NotBeNull();
 
-        if (response.SuggestedQueries.Any())
+        if (response.SuggestedQueries!.Any())
         {
-            Console.WriteLine($"✅ Generated {response.SuggestedQueries.Count} suggested queries:");
+            Console.WriteLine($"✅ Generated {response.SuggestedQueries!.Count} suggested queries:");
             foreach (var suggestion in response.SuggestedQueries.Take(3))
             {
                 Console.WriteLine($"   - {suggestion}");
