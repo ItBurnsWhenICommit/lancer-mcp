@@ -1,3 +1,5 @@
+using LancerMcp.Models;
+
 namespace LancerMcp.Configuration;
 
 /// <summary>
@@ -41,6 +43,11 @@ public sealed class ServerOptions
     /// Optional maximum size for tool responses.
     /// </summary>
     public int MaxResults { get; set; } = 50;
+
+    /// <summary>
+    /// Default retrieval profile for queries.
+    /// </summary>
+    public RetrievalProfile DefaultRetrievalProfile { get; set; } = RetrievalProfile.Fast;
 
     /// <summary>
     /// Maximum number of results in query responses.

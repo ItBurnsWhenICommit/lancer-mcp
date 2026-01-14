@@ -66,7 +66,8 @@ public class QueryOrchestratorEndToEndTests : FixtureTestBase
             _embeddingRepository,
             _symbolRepository,
             _edgeRepository,
-            embeddingService
+            embeddingService,
+            optionsMonitor
         );
     }
 
@@ -393,4 +394,3 @@ public class QueryOrchestratorEndToEndTests : FixtureTestBase
         public IDisposable? OnChange(Action<ServerOptions, string?> listener) => null;
     }
 }
-

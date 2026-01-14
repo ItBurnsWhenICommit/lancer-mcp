@@ -116,7 +116,8 @@ class Program
                 embeddingRepository,
                 symbolRepository,
                 edgeRepository,
-                embeddingService
+                embeddingService,
+                optionsMonitor
             );
 
             WriteSuccess("Services initialized");
@@ -251,4 +252,3 @@ class TestOptionsMonitor : IOptionsMonitor<ServerOptions>
 
     public IDisposable? OnChange(Action<ServerOptions, string?> listener) => null;
 }
-

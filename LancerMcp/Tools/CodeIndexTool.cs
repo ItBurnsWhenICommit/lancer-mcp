@@ -50,6 +50,8 @@ public sealed class CodeIndexTool
         string? branch = null,
         [Description("Optional: maximum number of results to return (default: 50)")]
         int? maxResults = null,
+        [Description("Optional: retrieval profile (Fast, Hybrid, Semantic). Defaults to Fast.")]
+        string? profile = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -125,6 +127,21 @@ public sealed class CodeIndexTool
                 }
             }
 
+            RetrievalProfile? profileOverride = null;
+            if (!string.IsNullOrWhiteSpace(profile))
+            {
+                if (!Enum.TryParse(profile, ignoreCase: true, out RetrievalProfile parsedProfile))
+                {
+                    return JsonSerializer.Serialize(new
+                    {
+                        error = $"Unknown retrieval profile '{profile}'",
+                        allowedProfiles = Enum.GetNames<RetrievalProfile>()
+                    });
+                }
+
+                profileOverride = parsedProfile;
+            }
+
             // Execute query using QueryOrchestrator
             var queryResponse = await _queryOrchestrator.QueryAsync(
                 query: query,
@@ -132,6 +149,7 @@ public sealed class CodeIndexTool
                 branchName: targetBranch,
                 language: null,
                 maxResults: maxResults ?? 50,
+                profileOverride: profileOverride,
                 cancellationToken: cancellationToken);
 
             var responseOptions = _options.CurrentValue;
@@ -160,4 +178,3 @@ public sealed class CodeIndexTool
         }
     }
 }
-

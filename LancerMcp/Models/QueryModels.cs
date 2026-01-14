@@ -4,6 +4,16 @@ using System.Text.Json;
 namespace LancerMcp.Models;
 
 /// <summary>
+/// Retrieval strategy profile.
+/// </summary>
+public enum RetrievalProfile
+{
+    Fast,
+    Hybrid,
+    Semantic
+}
+
+/// <summary>
 /// Represents the intent of a user query.
 /// </summary>
 public enum QueryIntent
@@ -48,6 +58,11 @@ public sealed class ParsedQuery
     /// Detected intent of the query
     /// </summary>
     public required QueryIntent Intent { get; init; }
+
+    /// <summary>
+    /// Retrieval profile used for this query.
+    /// </summary>
+    public RetrievalProfile Profile { get; init; } = RetrievalProfile.Fast;
 
     /// <summary>
     /// Extracted keywords from the query
@@ -429,4 +444,3 @@ public sealed class QueryResponse
         }
     }
 }
-

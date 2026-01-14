@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
+using LancerMcp.Configuration;
 using LancerMcp.Models;
 using LancerMcp.Repositories;
+using Microsoft.Extensions.Options;
 
 namespace LancerMcp.Services;
 
@@ -16,6 +18,7 @@ public sealed class QueryOrchestrator
     private readonly ISymbolRepository _symbolRepository;
     private readonly IEdgeRepository _edgeRepository;
     private readonly EmbeddingService _embeddingService;
+    private readonly IOptionsMonitor<ServerOptions> _options;
 
     // Intent detection patterns
 
@@ -89,7 +92,8 @@ public sealed class QueryOrchestrator
         IEmbeddingRepository embeddingRepository,
         ISymbolRepository symbolRepository,
         IEdgeRepository edgeRepository,
-        EmbeddingService embeddingService)
+        EmbeddingService embeddingService,
+        IOptionsMonitor<ServerOptions> options)
     {
         _logger = logger;
         _chunkRepository = chunkRepository;
@@ -97,6 +101,7 @@ public sealed class QueryOrchestrator
         _symbolRepository = symbolRepository;
         _edgeRepository = edgeRepository;
         _embeddingService = embeddingService;
+        _options = options;
     }
 
     /// <summary>
@@ -109,6 +114,7 @@ public sealed class QueryOrchestrator
         string? branchName = null,
         Language? language = null,
         int maxResults = 50,
+        RetrievalProfile? profileOverride = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(repositoryName))
@@ -121,7 +127,8 @@ public sealed class QueryOrchestrator
         try
         {
             // Step 1: Parse and analyze the query
-            var parsedQuery = ParseQuery(query, repositoryName, branchName, language, maxResults);
+            var profile = profileOverride ?? _options.CurrentValue.DefaultRetrievalProfile;
+            var parsedQuery = ParseQuery(query, repositoryName, branchName, language, maxResults, profile);
             _logger.LogInformation("Query intent detected: {Intent} for repository: {Repository}", parsedQuery.Intent, repositoryName);
 
             // Step 2: Execute search based on intent
@@ -150,7 +157,8 @@ public sealed class QueryOrchestrator
                 {
                     ["keywords"] = parsedQuery.Keywords,
                     ["repository"] = repositoryName,
-                    ["branch"] = branchName ?? "all"
+                    ["branch"] = branchName ?? "all",
+                    ["profile"] = parsedQuery.Profile.ToString()
                 }
             };
         }
@@ -169,7 +177,8 @@ public sealed class QueryOrchestrator
         string repositoryName,
         string? branchName,
         Language? language,
-        int maxResults)
+        int maxResults,
+        RetrievalProfile profile)
     {
         // Detect intent
         var intent = DetectIntent(query);
@@ -199,7 +208,8 @@ public sealed class QueryOrchestrator
             RepositoryName = repositoryName,
             BranchName = branchName,
             IncludeRelated = includeRelated,
-            MaxResults = maxResults
+            MaxResults = maxResults,
+            Profile = profile
         };
     }
 

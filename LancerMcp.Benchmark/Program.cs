@@ -128,7 +128,8 @@ var queryOrchestrator = new QueryOrchestrator(
     embeddingRepository,
     symbolRepository,
     edgeRepository,
-    embeddingService);
+    embeddingService,
+    optionsMonitor);
 
 var codeIndexTool = new CodeIndexTool(
     gitTracker,
