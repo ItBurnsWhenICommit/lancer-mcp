@@ -333,6 +333,10 @@ public sealed class IndexingService
         }
         _logger.LogInformation("Generated {Count} chunks", allChunks.Count);
 
+        // Step 1b: Build symbol search entries (CPU-light, do BEFORE transaction)
+        var symbolSearchEntries = parsedFiles.SelectMany(SymbolSearchBuilder.BuildEntries).ToList();
+        _logger.LogInformation("Generated {Count} symbol search entries", symbolSearchEntries.Count);
+
         // Step 2: Generate embeddings (HTTP calls, do BEFORE transaction)
         List<Embedding> embeddings = new();
         if (allChunks.Any())
@@ -419,6 +423,13 @@ public sealed class IndexingService
             {
                 await _persistenceService.CreateSymbolsBatchAsync(connection, transaction, allSymbols, cancellationToken);
                 _logger.LogInformation("Persisted {Count} symbols", allSymbols.Count);
+            }
+
+            // Step 3d.1: Persist symbol search entries
+            if (symbolSearchEntries.Any())
+            {
+                await _persistenceService.CreateSymbolSearchBatchAsync(connection, transaction, symbolSearchEntries, cancellationToken);
+                _logger.LogInformation("Persisted {Count} symbol search entries", symbolSearchEntries.Count);
             }
 
             // Step 3e: Resolve cross-file edges

@@ -26,3 +26,14 @@ CREATE INDEX IF NOT EXISTS idx_symbols_qualified_name_lower
 COMMENT ON INDEX idx_symbols_qualified_name_lower IS
     'Functional index for case-insensitive qualified name lookups in EdgeResolutionService. Uses LOWER() without COLLATE (locale-dependent). Assumes ASCII qualified names or compatible database locale.';
 
+-- ============================================================================
+-- Symbol Search Indexes
+-- ============================================================================
+CREATE INDEX IF NOT EXISTS idx_symbol_search_repo_branch
+    ON symbol_search(repo_id, branch_name);
+
+CREATE INDEX IF NOT EXISTS idx_symbol_search_kind
+    ON symbol_search(kind);
+
+CREATE INDEX IF NOT EXISTS idx_symbol_search_vector
+    ON symbol_search USING GIN (search_vector);
