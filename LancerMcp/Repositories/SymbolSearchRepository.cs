@@ -117,5 +117,5 @@ public sealed class SymbolSearchRepository : ISymbolSearchRepository
         return tokens.Count == 0 ? string.Empty : string.Join(' ', tokens);
     }
 
-    private sealed record SearchRow(string SymbolId, float Score, string? Snippet);
+    private sealed record SearchRow(string SymbolId, string? Snippet, float Score);
 }

@@ -14,6 +14,8 @@ public sealed class SymbolSearchRepositoryTests : FixtureTestBase
     [Fact]
     public async Task SearchAsync_ReturnsMatchesFromSymbolSearch()
     {
+        const string uniqueToken = "symbolsearch_unique_token_20260114";
+
         await ExecuteAsync(@"
             CREATE TABLE IF NOT EXISTS symbol_search (
                 symbol_id TEXT PRIMARY KEY,
@@ -32,14 +34,16 @@ public sealed class SymbolSearchRepositoryTests : FixtureTestBase
                 search_vector tsvector
             );");
 
+        await ExecuteAsync("DELETE FROM symbol_search WHERE symbol_id = 'sym1';");
+
         await ExecuteAsync(@"
             INSERT INTO symbol_search (symbol_id, repo_id, branch_name, commit_sha, file_path, language, kind,
                                        name_tokens, qualified_tokens, signature_tokens, documentation_tokens, literal_tokens, snippet, search_vector)
             VALUES ('sym1', 'lancer-mcp', 'main', 'sha', 'Auth.cs', 'CSharp', 'Class',
-                    'auth service', 'demo auth service', 'authservice()', 'authentication', 'invalid password',
+                    @Token, @Token, 'authservice()', 'authentication', 'invalid password',
                     'public class AuthService { }',
-                    setweight(to_tsvector('english','auth service'), 'A'));
-        ");
+                    setweight(to_tsvector('english', @Token), 'A'));
+        ", new { Token = uniqueToken });
 
         var serverOptions = new ServerOptions
         {
@@ -55,10 +59,9 @@ public sealed class SymbolSearchRepositoryTests : FixtureTestBase
             new DatabaseService(NullLogger<DatabaseService>.Instance, optionsMonitor),
             NullLogger<SymbolSearchRepository>.Instance);
 
-        var results = await repo.SearchAsync("lancer-mcp", "auth service", "main", 10);
+        var results = await repo.SearchAsync("lancer-mcp", uniqueToken, "main", 10);
 
-        results.Should().NotBeEmpty();
-        results.First().SymbolId.Should().Be("sym1");
+        results.Should().Contain(r => r.SymbolId == "sym1");
     }
 
     private sealed class TestOptionsMonitor : IOptionsMonitor<ServerOptions>
