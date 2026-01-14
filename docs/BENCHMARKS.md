@@ -32,8 +32,8 @@ The benchmark uses the same environment variables as the main server:
 
 ## Baseline (Phase 0)
 
-- Indexing time (ms): TBD
-- Peak memory (bytes): TBD
-- DB size (bytes): TBD
-- Query p50/p95 (ms): TBD
-- Top-k hit rate: TBD
+- Indexing time (ms): 2970
+- Peak memory (bytes): 188698624
+- DB size (bytes): 9875939
+- Query p50/p95 (ms): 3/150
+- Top-k hit rate: 100.0% (Top-5)
