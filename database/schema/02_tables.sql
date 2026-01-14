@@ -153,6 +153,29 @@ COMMENT ON COLUMN symbols.signature IS 'Method/function signature';
 COMMENT ON COLUMN symbols.modifiers IS 'Access modifiers (public, private, static, etc.)';
 
 -- ============================================================================
+-- Symbol Search Table
+-- ============================================================================
+CREATE TABLE symbol_search (
+    symbol_id TEXT PRIMARY KEY REFERENCES symbols(id) ON DELETE CASCADE,
+    repo_id TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+    branch_name TEXT NOT NULL,
+    commit_sha TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    language language NOT NULL DEFAULT 'Unknown',
+    kind symbol_kind NOT NULL DEFAULT 'Unknown',
+    name_tokens TEXT,
+    qualified_tokens TEXT,
+    signature_tokens TEXT,
+    documentation_tokens TEXT,
+    literal_tokens TEXT,
+    snippet TEXT,
+    search_vector tsvector
+);
+
+COMMENT ON TABLE symbol_search IS 'Sparse retrieval index for symbols (weighted tokens + snippet)';
+COMMENT ON COLUMN symbol_search.search_vector IS 'Weighted tsvector for token search';
+
+-- ============================================================================
 -- Edges Table (Symbol Relationships)
 -- ============================================================================
 CREATE TABLE edges (
@@ -202,4 +225,3 @@ BEGIN
     RAISE NOTICE '  - symbols';
     RAISE NOTICE '  - edges';
 END $$;
-

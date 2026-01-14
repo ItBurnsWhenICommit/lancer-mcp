@@ -212,6 +212,11 @@ public interface ISymbolRepository
     Task<Symbol?> GetByIdAsync(string id, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Gets symbols by IDs.
+    /// </summary>
+    Task<IEnumerable<Symbol>> GetByIdsAsync(IEnumerable<string> symbolIds, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Gets all symbols for a file.
     /// </summary>
     Task<IEnumerable<Symbol>> GetByFileAsync(string repoId, string branchName, string filePath, CancellationToken cancellationToken = default);
@@ -312,4 +317,3 @@ public interface IEdgeRepository
     /// </summary>
     Task<int> DeleteByBranchAsync(string repoId, string branchName, CancellationToken cancellationToken = default);
 }
-

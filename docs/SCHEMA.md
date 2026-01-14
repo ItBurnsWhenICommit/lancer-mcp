@@ -34,6 +34,14 @@
 - `start_line`, `end_line`, `start_column`, `end_column`
 - `parent_symbol_id`, `signature`, `documentation`, `modifiers`
 
+### symbol_search
+- `symbol_id` (PK, references symbols)
+- `repo_id`, `branch_name`, `commit_sha`, `file_path`, `language`, `kind`
+- `name_tokens`, `qualified_tokens`, `signature_tokens`
+- `documentation_tokens`, `literal_tokens`
+- `snippet`
+- `search_vector` (weighted tsvector)
+
 ### edges
 - `source_symbol_id`, `target_symbol_id`, `kind`
 - `repo_id`, `branch_name`, `commit_sha`
@@ -54,5 +62,6 @@
 
 - Repos/branches/commits track Git state for incremental indexing
 - Files/symbols/edges provide symbol-level retrieval and graph signals
+- Symbol_search enables the Fast profile via weighted token search on symbols
 - Code chunks support sparse retrieval and optional embeddings
 - Embeddings are optional and isolated from baseline retrieval

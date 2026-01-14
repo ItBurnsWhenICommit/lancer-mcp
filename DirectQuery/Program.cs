@@ -81,6 +81,11 @@ class Program
                 loggerFactory.CreateLogger<SymbolRepository>()
             );
 
+            var symbolSearchRepository = new SymbolSearchRepository(
+                databaseService,
+                loggerFactory.CreateLogger<SymbolSearchRepository>()
+            );
+
             var edgeRepository = new EdgeRepository(
                 databaseService,
                 loggerFactory.CreateLogger<EdgeRepository>()
@@ -115,8 +120,10 @@ class Program
                 chunkRepository,
                 embeddingRepository,
                 symbolRepository,
+                symbolSearchRepository,
                 edgeRepository,
-                embeddingService
+                embeddingService,
+                optionsMonitor
             );
 
             WriteSuccess("Services initialized");
@@ -251,4 +258,3 @@ class TestOptionsMonitor : IOptionsMonitor<ServerOptions>
 
     public IDisposable? OnChange(Action<ServerOptions, string?> listener) => null;
 }
-

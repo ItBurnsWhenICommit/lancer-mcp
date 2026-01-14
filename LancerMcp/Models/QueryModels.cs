@@ -4,6 +4,16 @@ using System.Text.Json;
 namespace LancerMcp.Models;
 
 /// <summary>
+/// Retrieval strategy profile.
+/// </summary>
+public enum RetrievalProfile
+{
+    Fast,
+    Hybrid,
+    Semantic
+}
+
+/// <summary>
 /// Represents the intent of a user query.
 /// </summary>
 public enum QueryIntent
@@ -48,6 +58,11 @@ public sealed class ParsedQuery
     /// Detected intent of the query
     /// </summary>
     public required QueryIntent Intent { get; init; }
+
+    /// <summary>
+    /// Retrieval profile used for this query.
+    /// </summary>
+    public RetrievalProfile Profile { get; init; } = RetrievalProfile.Fast;
 
     /// <summary>
     /// Extracted keywords from the query
@@ -184,6 +199,11 @@ public sealed class SearchResult
     /// Related symbols (references, calls, etc.)
     /// </summary>
     public List<RelatedSymbol>? RelatedSymbols { get; init; }
+
+    /// <summary>
+    /// Compact reasons for why this result was returned.
+    /// </summary>
+    public List<string>? Reasons { get; init; }
 }
 
 /// <summary>
@@ -362,6 +382,11 @@ public sealed class QueryResponse
             }).ToArray();
         }
 
+        if (result.Reasons?.Count > 0)
+        {
+            minimalResult["why"] = result.Reasons.Take(3).ToArray();
+        }
+
         return minimalResult;
     }
 
@@ -429,4 +454,3 @@ public sealed class QueryResponse
         }
     }
 }
-

@@ -211,6 +211,68 @@ public sealed class PersistenceService
     }
 
     /// <summary>
+    /// Persists symbol search entries in a batch within a transaction.
+    /// </summary>
+    public async Task CreateSymbolSearchBatchAsync(
+        Npgsql.NpgsqlConnection connection,
+        Npgsql.NpgsqlTransaction transaction,
+        List<SymbolSearchEntry> entries,
+        CancellationToken cancellationToken)
+    {
+        if (entries.Count == 0)
+        {
+            return;
+        }
+
+        const string sql = @"
+            INSERT INTO symbol_search (symbol_id, repo_id, branch_name, commit_sha, file_path, language, kind,
+                                       name_tokens, qualified_tokens, signature_tokens, documentation_tokens, literal_tokens,
+                                       snippet, search_vector)
+            VALUES (@SymbolId, @RepositoryName, @BranchName, @CommitSha, @FilePath, @Language::language, @Kind::symbol_kind,
+                    @NameTokens, @QualifiedTokens, @SignatureTokens, @DocumentationTokens, @LiteralTokens,
+                    @Snippet,
+                    setweight(to_tsvector('english', @NameTokens), 'A') ||
+                    setweight(to_tsvector('english', @QualifiedTokens), 'A') ||
+                    setweight(to_tsvector('english', @SignatureTokens), 'B') ||
+                    setweight(to_tsvector('english', @DocumentationTokens), 'C') ||
+                    setweight(to_tsvector('english', @LiteralTokens), 'D'))
+            ON CONFLICT (symbol_id) DO UPDATE
+            SET repo_id = EXCLUDED.repo_id,
+                branch_name = EXCLUDED.branch_name,
+                commit_sha = EXCLUDED.commit_sha,
+                file_path = EXCLUDED.file_path,
+                language = EXCLUDED.language,
+                kind = EXCLUDED.kind,
+                name_tokens = EXCLUDED.name_tokens,
+                qualified_tokens = EXCLUDED.qualified_tokens,
+                signature_tokens = EXCLUDED.signature_tokens,
+                documentation_tokens = EXCLUDED.documentation_tokens,
+                literal_tokens = EXCLUDED.literal_tokens,
+                snippet = EXCLUDED.snippet,
+                search_vector = EXCLUDED.search_vector";
+
+        var entryList = entries.Select(entry => new
+        {
+            entry.SymbolId,
+            entry.RepositoryName,
+            entry.BranchName,
+            entry.CommitSha,
+            entry.FilePath,
+            Language = entry.Language.ToString(),
+            Kind = entry.Kind.ToString(),
+            NameTokens = JoinTokens(entry.NameTokens),
+            QualifiedTokens = JoinTokens(entry.QualifiedTokens),
+            SignatureTokens = JoinTokens(entry.SignatureTokens),
+            DocumentationTokens = JoinTokens(entry.DocumentationTokens),
+            LiteralTokens = JoinTokens(entry.LiteralTokens),
+            entry.Snippet
+        }).ToList();
+
+        var command = new CommandDefinition(sql, entryList, transaction, cancellationToken: cancellationToken);
+        await connection.ExecuteAsync(command);
+    }
+
+    /// <summary>
     /// Persists code chunks in a batch within a transaction.
     /// </summary>
     public async Task CreateChunksBatchAsync(
@@ -293,5 +355,9 @@ public sealed class PersistenceService
         var command = new CommandDefinition(sql, embeddingsList, transaction, cancellationToken: cancellationToken);
         await connection.ExecuteAsync(command);
     }
-}
 
+    private static string JoinTokens(IReadOnlyList<string> tokens)
+    {
+        return tokens.Count == 0 ? string.Empty : string.Join(' ', tokens);
+    }
+}

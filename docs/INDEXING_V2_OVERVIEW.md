@@ -18,8 +18,9 @@
 ## Architecture (Target)
 
 - Language frontends emit symbols and edges at symbol granularity
-- Token index and BM25 provide primary retrieval
-- Structural reranking boosts type/member and graph proximity
+- Symbol search index (symbol_search) stores weighted tokens and minimal snippets
+- Token index and BM25 provide primary retrieval (Fast profile via symbol_search)
+- Structural reranking boosts type/member and graph proximity signals
 - Response compaction enforces strict payload budgets
 
 ## Tradeoffs

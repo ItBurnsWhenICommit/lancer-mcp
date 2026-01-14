@@ -129,6 +129,11 @@ public sealed class Symbol
     public string? Documentation { get; init; }
 
     /// <summary>
+    /// Optional string literal tokens referenced by this symbol.
+    /// </summary>
+    public string[]? LiteralTokens { get; init; }
+
+    /// <summary>
     /// Optional modifiers (public, private, static, async, etc.).
     /// </summary>
     public string[]? Modifiers { get; init; }
@@ -295,4 +300,3 @@ public sealed class ParsedFile
     /// </summary>
     public DateTimeOffset ParsedAt { get; init; } = DateTimeOffset.UtcNow;
 }
-

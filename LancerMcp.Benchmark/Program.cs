@@ -77,6 +77,10 @@ var symbolRepository = new SymbolRepository(
     databaseService,
     loggerFactory.CreateLogger<SymbolRepository>());
 
+var symbolSearchRepository = new SymbolSearchRepository(
+    databaseService,
+    loggerFactory.CreateLogger<SymbolSearchRepository>());
+
 var edgeRepository = new EdgeRepository(
     databaseService,
     loggerFactory.CreateLogger<EdgeRepository>());
@@ -127,8 +131,10 @@ var queryOrchestrator = new QueryOrchestrator(
     chunkRepository,
     embeddingRepository,
     symbolRepository,
+    symbolSearchRepository,
     edgeRepository,
-    embeddingService);
+    embeddingService,
+    optionsMonitor);
 
 var codeIndexTool = new CodeIndexTool(
     gitTracker,

@@ -59,6 +59,7 @@ builder.Services.AddSingleton<IBranchRepository, BranchRepository>();
 builder.Services.AddSingleton<ICommitRepository, CommitRepository>();
 builder.Services.AddSingleton<IFileRepository, FileRepository>();
 builder.Services.AddSingleton<ISymbolRepository, SymbolRepository>();
+builder.Services.AddSingleton<ISymbolSearchRepository, SymbolSearchRepository>();
 builder.Services.AddSingleton<IEdgeRepository, EdgeRepository>();
 builder.Services.AddSingleton<ICodeChunkRepository, CodeChunkRepository>();
 builder.Services.AddSingleton<IEmbeddingRepository, EmbeddingRepository>();
