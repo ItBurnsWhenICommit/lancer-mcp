@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -13,11 +14,100 @@ public sealed class RoslynParserService
 {
     private static readonly Lazy<ImmutableArray<MetadataReference>> _defaultMetadataReferences =
         new(LoadMetadataReferences, LazyThreadSafetyMode.ExecutionAndPublication);
+    private static readonly SymbolDisplayFormat CanonicalDisplayFormat = new(
+        globalNamespaceStyle: SymbolDisplayGlobalNamespaceStyle.Omitted,
+        typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces,
+        genericsOptions: SymbolDisplayGenericsOptions.IncludeTypeParameters,
+        memberOptions: SymbolDisplayMemberOptions.IncludeContainingType | SymbolDisplayMemberOptions.IncludeParameters,
+        parameterOptions: SymbolDisplayParameterOptions.IncludeType | SymbolDisplayParameterOptions.IncludeParamsRefOut,
+        miscellaneousOptions: SymbolDisplayMiscellaneousOptions.EscapeKeywordIdentifiers);
+    private static readonly IReadOnlyDictionary<string, string> SpecialTypeKeywordMap = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["bool"] = "System.Boolean",
+        ["byte"] = "System.Byte",
+        ["sbyte"] = "System.SByte",
+        ["short"] = "System.Int16",
+        ["ushort"] = "System.UInt16",
+        ["int"] = "System.Int32",
+        ["uint"] = "System.UInt32",
+        ["long"] = "System.Int64",
+        ["ulong"] = "System.UInt64",
+        ["float"] = "System.Single",
+        ["double"] = "System.Double",
+        ["decimal"] = "System.Decimal",
+        ["char"] = "System.Char",
+        ["string"] = "System.String",
+        ["object"] = "System.Object",
+        ["nint"] = "System.IntPtr",
+        ["nuint"] = "System.UIntPtr",
+        ["void"] = "System.Void"
+    };
+    private static readonly Regex SpecialTypeKeywordRegex = new(
+        @"\b(bool|byte|sbyte|short|ushort|int|uint|long|ulong|float|double|decimal|char|string|object|nint|nuint|void)\b",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex SpecialTypeQualifiedKeywordRegex = new(
+        @"\bSystem\.(bool|byte|sbyte|short|ushort|int|uint|long|ulong|float|double|decimal|char|string|object|nint|nuint|void)\b",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private readonly ILogger<RoslynParserService> _logger;
 
     public RoslynParserService(ILogger<RoslynParserService> logger)
     {
         _logger = logger;
+    }
+
+    private static string? GetCanonicalQualifiedName(ISymbol? symbol)
+    {
+        if (symbol == null)
+        {
+            return null;
+        }
+
+        var parts = symbol.ToDisplayParts(CanonicalDisplayFormat);
+        string display;
+        if (parts.Length == 0)
+        {
+            display = symbol.ToDisplayString(CanonicalDisplayFormat);
+        }
+        else
+        {
+            var formattedParts = new string[parts.Length];
+            for (var i = 0; i < parts.Length; i++)
+            {
+                formattedParts[i] = FormatDisplayPart(parts[i]);
+            }
+
+            display = string.Concat(formattedParts);
+        }
+
+        return ReplaceSpecialTypeKeywords(display);
+    }
+
+    private static string FormatDisplayPart(SymbolDisplayPart part)
+    {
+        if (part.Symbol is ITypeSymbol typeSymbol && typeSymbol.SpecialType != SpecialType.None)
+        {
+            var fullyQualified = typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+            return StripGlobalQualifier(fullyQualified);
+        }
+
+        if (part.Kind == SymbolDisplayPartKind.Keyword &&
+            SpecialTypeKeywordMap.TryGetValue(part.ToString(), out var replacement))
+        {
+            return replacement;
+        }
+
+        return part.ToString();
+    }
+
+    private static string StripGlobalQualifier(string name)
+    {
+        return name.Replace("global::", string.Empty, StringComparison.Ordinal);
+    }
+
+    private static string ReplaceSpecialTypeKeywords(string display)
+    {
+        var normalized = SpecialTypeQualifiedKeywordRegex.Replace(display, match => SpecialTypeKeywordMap[match.Groups[1].Value]);
+        return SpecialTypeKeywordRegex.Replace(normalized, match => SpecialTypeKeywordMap[match.Value]);
     }
 
     /// <summary>
@@ -277,7 +367,7 @@ public sealed class RoslynParserService
                 CommitSha = _commitSha,
                 FilePath = _filePath,
                 Name = identifier.Text,
-                QualifiedName = symbolInfo?.ToDisplayString(),
+                QualifiedName = GetCanonicalQualifiedName(symbolInfo),
                 Kind = kind,
                 Language = Language.CSharp,
                 StartLine = lineSpan.StartLinePosition.Line + 1,
@@ -315,7 +405,7 @@ public sealed class RoslynParserService
                 CommitSha = _commitSha,
                 FilePath = _filePath,
                 Name = name.ToString(),
-                QualifiedName = symbolInfo?.ToDisplayString(),
+                QualifiedName = GetCanonicalQualifiedName(symbolInfo),
                 Kind = kind,
                 Language = Language.CSharp,
                 StartLine = lineSpan.StartLinePosition.Line + 1,
@@ -381,7 +471,7 @@ public sealed class RoslynParserService
 
                 if (symbolInfo.Symbol != null)
                 {
-                    qualifiedName = symbolInfo.Symbol.ToDisplayString();
+                    qualifiedName = GetCanonicalQualifiedName(symbolInfo.Symbol);
                 }
                 else
                 {
@@ -435,8 +525,8 @@ public sealed class RoslynParserService
                 var typeInfo = _semanticModel.GetTypeInfo(memberAccess.Expression);
                 if (typeInfo.Type != null)
                 {
-                    var typeName = typeInfo.Type.ToDisplayString();
-                    return $"{typeName}.{memberName}";
+                    var typeName = GetCanonicalQualifiedName(typeInfo.Type);
+                    return string.IsNullOrWhiteSpace(typeName) ? null : $"{typeName}.{memberName}";
                 }
 
                 // Fallback: Check if it's a field we've seen in this file

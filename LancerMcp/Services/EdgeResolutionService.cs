@@ -39,10 +39,17 @@ public sealed class EdgeResolutionService
         // Build lookup for current batch symbols (qualified_name -> symbol ID)
         var currentBatchLookup = currentBatchSymbols
             .Where(s => !string.IsNullOrWhiteSpace(s.QualifiedName))
-            .GroupBy(s => NormalizeQualifiedName(s.QualifiedName!))
+            .GroupBy(s => NormalizeQualifiedName(s.QualifiedName!, stripParameters: false))
             .ToDictionary(
                 g => g.Key,
                 g => g.First().Id,
+                StringComparer.OrdinalIgnoreCase);
+        var currentBatchStrippedLookup = currentBatchSymbols
+            .Where(s => !string.IsNullOrWhiteSpace(s.QualifiedName))
+            .GroupBy(s => NormalizeQualifiedName(s.QualifiedName!, stripParameters: true))
+            .ToDictionary(
+                g => g.Key,
+                g => g.Select(s => s.Id).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
                 StringComparer.OrdinalIgnoreCase);
         var currentBatchById = currentBatchSymbols.ToDictionary(s => s.Id);
 
@@ -56,11 +63,16 @@ public sealed class EdgeResolutionService
 
         // Key format: "repo:branch:qualified_name" to prevent cross-repo contamination
         var databaseLookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var databaseStrippedLookup = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var repoGroup in edgesByRepo)
         {
             var targetQualifiedNames = repoGroup
-                .Select(e => NormalizeQualifiedName(e.TargetSymbolId))
+                .Select(e => NormalizeQualifiedName(e.TargetSymbolId, stripParameters: false))
+                .Distinct()
+                .ToList();
+            var targetQualifiedNameBases = repoGroup
+                .Select(e => NormalizeQualifiedName(e.TargetSymbolId, stripParameters: true))
                 .Distinct()
                 .ToList();
 
@@ -95,12 +107,55 @@ public sealed class EdgeResolutionService
 
             foreach (var (id, qualifiedName) in dbSymbols)
             {
-                var normalized = NormalizeQualifiedName(qualifiedName);
+                var normalized = NormalizeQualifiedName(qualifiedName, stripParameters: false);
                 // Include repo and branch in the lookup key to prevent cross-repo contamination
                 var lookupKey = $"{repoGroup.Key.RepositoryName}:{repoGroup.Key.BranchName}:{normalized}";
                 if (!databaseLookup.ContainsKey(lookupKey))
                 {
                     databaseLookup[lookupKey] = id;
+                }
+            }
+
+            if (targetQualifiedNameBases.Count > 0)
+            {
+                var patterns = targetQualifiedNameBases
+                    .SelectMany(name => new[] { name, $"{name}(%"})
+                    .Distinct()
+                    .ToList();
+
+                const string fallbackSql = @"
+                    SELECT id, qualified_name
+                    FROM symbols
+                    WHERE repo_id = @RepoId
+                      AND branch_name = @BranchName
+                      AND LOWER(qualified_name) LIKE ANY(@QualifiedNamePatterns)";
+
+                var fallbackCommand = new CommandDefinition(
+                    fallbackSql,
+                    new
+                    {
+                        RepoId = repoGroup.Key.RepositoryName,
+                        BranchName = repoGroup.Key.BranchName,
+                        QualifiedNamePatterns = patterns.ToArray()
+                    },
+                    transaction,
+                    cancellationToken: cancellationToken);
+
+                var fallbackSymbols = await connection.QueryAsync<(string Id, string QualifiedName)>(fallbackCommand);
+                foreach (var (id, qualifiedName) in fallbackSymbols)
+                {
+                    var normalized = NormalizeQualifiedName(qualifiedName, stripParameters: true);
+                    var lookupKey = $"{repoGroup.Key.RepositoryName}:{repoGroup.Key.BranchName}:{normalized}";
+                    if (!databaseStrippedLookup.TryGetValue(lookupKey, out var ids))
+                    {
+                        ids = new List<string>();
+                        databaseStrippedLookup[lookupKey] = ids;
+                    }
+
+                    if (!ids.Contains(id, StringComparer.OrdinalIgnoreCase))
+                    {
+                        ids.Add(id);
+                    }
                 }
             }
         }
@@ -115,7 +170,7 @@ public sealed class EdgeResolutionService
             if (!Guid.TryParse(targetId, out _))
             {
                 // Target is a qualified name string, try to resolve it
-                var normalizedTarget = NormalizeQualifiedName(targetId);
+                var normalizedTarget = NormalizeQualifiedName(targetId, stripParameters: false);
 
                 // First check current batch (same repo/branch only)
                 if (currentBatchLookup.TryGetValue(normalizedTarget, out var resolvedId))
@@ -136,11 +191,25 @@ public sealed class EdgeResolutionService
                         _logger.LogDebug("Resolved edge target '{OriginalTarget}' -> '{NormalizedTarget}' to symbol ID {SymbolId} (database)",
                             edge.TargetSymbolId, normalizedTarget, resolvedId);
                     }
+                    var strippedTarget = NormalizeQualifiedName(targetId, stripParameters: true);
+                    if (TryResolveByStrippedName(
+                            strippedTarget,
+                            currentBatchStrippedLookup,
+                            databaseStrippedLookup,
+                            edge.RepositoryName,
+                            edge.BranchName,
+                            out resolvedId))
+                    {
+                        targetId = resolvedId;
+                        wasResolved = true;
+                        _logger.LogDebug("Resolved edge target '{OriginalTarget}' -> '{NormalizedTarget}' to symbol ID {SymbolId} (stripped fallback)",
+                            edge.TargetSymbolId, strippedTarget, resolvedId);
+                    }
                     // Fallback: resolve simple method names within the same parent symbol
                     else if (currentBatchById.TryGetValue(edge.SourceSymbolId, out var sourceSymbol) &&
                              !string.IsNullOrWhiteSpace(sourceSymbol.ParentSymbolId))
                     {
-                        var simpleName = ExtractSimpleName(normalizedTarget);
+                        var simpleName = ExtractSimpleName(strippedTarget);
                         if (!string.IsNullOrEmpty(simpleName))
                         {
                             var localMatch = currentBatchSymbols.FirstOrDefault(s =>
@@ -196,16 +265,47 @@ public sealed class EdgeResolutionService
     /// for ASCII qualified names (typical in C#), but may have edge cases with non-ASCII symbols
     /// if the database locale differs from invariant culture (e.g., Turkish İ/i).
     /// </summary>
-    private static string NormalizeQualifiedName(string qualifiedName)
+    private static string NormalizeQualifiedName(string qualifiedName, bool stripParameters)
     {
         var trimmed = qualifiedName.Trim();
-        var parameterIndex = trimmed.IndexOf('(');
-        if (parameterIndex >= 0)
+        if (stripParameters)
         {
-            trimmed = trimmed[..parameterIndex];
+            var parameterIndex = trimmed.IndexOf('(');
+            if (parameterIndex >= 0)
+            {
+                trimmed = trimmed[..parameterIndex];
+            }
         }
 
         return trimmed.ToLowerInvariant();
+    }
+
+    private static bool TryResolveByStrippedName(
+        string strippedTarget,
+        IReadOnlyDictionary<string, List<string>> currentBatchStrippedLookup,
+        IReadOnlyDictionary<string, List<string>> databaseStrippedLookup,
+        string repositoryName,
+        string branchName,
+        out string resolvedId)
+    {
+        resolvedId = string.Empty;
+
+        if (currentBatchStrippedLookup.TryGetValue(strippedTarget, out var currentIds) &&
+            currentIds.Count == 1)
+        {
+            resolvedId = currentIds[0];
+            return true;
+        }
+
+        var lookupKey = $"{repositoryName}:{branchName}:{strippedTarget}";
+        if (databaseStrippedLookup.TryGetValue(lookupKey, out var databaseIds) &&
+            databaseIds.Count == 1)
+        {
+            resolvedId = databaseIds[0];
+            return true;
+        }
+
+        return false;
     }
 
     private static string ExtractSimpleName(string normalizedQualifiedName)

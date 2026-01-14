@@ -13,3 +13,7 @@
 - fixed pgvector Dapper parameter handling to set vector type name
 - improved edge resolution with a local-name fallback for method calls
 - added tests for commit metadata UTC normalization and vector type handler behavior
+
+## [phase 1] csharp symbol-first index
+
+- canonicalized C# qualified names (namespace + containing type + parameter types)
