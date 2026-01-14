@@ -110,7 +110,7 @@ public sealed class PersistenceService
                                size_bytes, line_count, indexed_at)
             VALUES (@Id, @RepoId, @BranchName, @CommitSha, @FilePath, @Language::language,
                     @SizeBytes, @LineCount, @IndexedAt)
-            ON CONFLICT (repo_id, branch_name, file_path) DO UPDATE
+            ON CONFLICT (repo_id, branch_name, commit_sha, file_path) DO UPDATE
             SET commit_sha = EXCLUDED.commit_sha,
                 language = EXCLUDED.language,
                 size_bytes = EXCLUDED.size_bytes,
@@ -188,11 +188,11 @@ public sealed class PersistenceService
         CancellationToken cancellationToken)
     {
         const string sql = @"
-            INSERT INTO symbol_edges (id, source_symbol_id, target_symbol_id, kind, repo_id,
+            INSERT INTO edges (id, source_symbol_id, target_symbol_id, kind, repo_id,
                                       branch_name, commit_sha, indexed_at)
             VALUES (@Id, @SourceSymbolId, @TargetSymbolId, @Kind::edge_kind, @RepositoryName,
                     @BranchName, @CommitSha, @IndexedAt)
-            ON CONFLICT (source_symbol_id, target_symbol_id, kind) DO NOTHING";
+            ON CONFLICT (id) DO NOTHING";
 
         var edgesList = edges.Select(e => new
         {
