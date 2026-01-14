@@ -17,3 +17,11 @@
 ## [phase 1] csharp symbol-first index
 
 - canonicalized C# qualified names (namespace + containing type + parameter types)
+
+## [phase 2] fast symbol retrieval
+
+- added retrieval profile plumbing with Fast default and profile metadata
+- added symbol tokenization and literal token capture for C# symbols
+- added symbol_search entries with snippets for sparse symbol retrieval
+- added symbol_search schema + indexes and persistence wiring
+- implemented Fast profile symbol retrieval with compact "why" signals
