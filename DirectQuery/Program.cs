@@ -81,6 +81,11 @@ class Program
                 loggerFactory.CreateLogger<SymbolRepository>()
             );
 
+            var symbolSearchRepository = new SymbolSearchRepository(
+                databaseService,
+                loggerFactory.CreateLogger<SymbolSearchRepository>()
+            );
+
             var edgeRepository = new EdgeRepository(
                 databaseService,
                 loggerFactory.CreateLogger<EdgeRepository>()
@@ -115,6 +120,7 @@ class Program
                 chunkRepository,
                 embeddingRepository,
                 symbolRepository,
+                symbolSearchRepository,
                 edgeRepository,
                 embeddingService,
                 optionsMonitor

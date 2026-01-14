@@ -199,6 +199,11 @@ public sealed class SearchResult
     /// Related symbols (references, calls, etc.)
     /// </summary>
     public List<RelatedSymbol>? RelatedSymbols { get; init; }
+
+    /// <summary>
+    /// Compact reasons for why this result was returned.
+    /// </summary>
+    public List<string>? Reasons { get; init; }
 }
 
 /// <summary>
@@ -375,6 +380,11 @@ public sealed class QueryResponse
                 file = rs.FilePath,
                 line = rs.Line
             }).ToArray();
+        }
+
+        if (result.Reasons?.Count > 0)
+        {
+            minimalResult["why"] = result.Reasons.Take(3).ToArray();
         }
 
         return minimalResult;

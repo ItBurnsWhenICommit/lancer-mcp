@@ -17,7 +17,7 @@ public sealed class SymbolSearchRepository : ISymbolSearchRepository
         _logger = logger;
     }
 
-    public async Task<IEnumerable<(string SymbolId, float Score)>> SearchAsync(
+    public async Task<IEnumerable<(string SymbolId, float Score, string? Snippet)>> SearchAsync(
         string repoId,
         string query,
         string? branchName,
@@ -31,11 +31,12 @@ public sealed class SymbolSearchRepository : ISymbolSearchRepository
 
         if (string.IsNullOrWhiteSpace(query))
         {
-            return Array.Empty<(string, float)>();
+            return Array.Empty<(string, float, string?)>();
         }
 
         var sql = @"
             SELECT symbol_id AS SymbolId,
+                   snippet AS Snippet,
                    COALESCE(ts_rank(search_vector, websearch_to_tsquery('english', @Query)), 0) AS Score
             FROM symbol_search
             WHERE repo_id = @RepoId
@@ -52,7 +53,7 @@ public sealed class SymbolSearchRepository : ISymbolSearchRepository
             Limit = limit
         }, cancellationToken);
 
-        return results.Select(r => (r.SymbolId, r.Score));
+        return results.Select(r => (r.SymbolId, r.Score, r.Snippet));
     }
 
     public async Task<int> CreateBatchAsync(IEnumerable<SymbolSearchEntry> entries, CancellationToken cancellationToken = default)
@@ -116,5 +117,5 @@ public sealed class SymbolSearchRepository : ISymbolSearchRepository
         return tokens.Count == 0 ? string.Empty : string.Join(' ', tokens);
     }
 
-    private sealed record SearchRow(string SymbolId, float Score);
+    private sealed record SearchRow(string SymbolId, float Score, string? Snippet);
 }

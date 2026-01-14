@@ -31,6 +31,26 @@ public sealed class SymbolRepository : ISymbolRepository
         return await _db.QueryFirstOrDefaultAsync<Symbol>(sql, new { Id = id }, cancellationToken);
     }
 
+    public async Task<IEnumerable<Symbol>> GetByIdsAsync(IEnumerable<string> symbolIds, CancellationToken cancellationToken = default)
+    {
+        var ids = symbolIds.Distinct().ToArray();
+        if (ids.Length == 0)
+        {
+            return Array.Empty<Symbol>();
+        }
+
+        const string sql = @"
+            SELECT id, repo_id AS RepositoryName, branch_name AS BranchName, commit_sha AS CommitSha,
+                   file_path AS FilePath, name, qualified_name AS QualifiedName, kind, language,
+                   start_line AS StartLine, start_column AS StartColumn, end_line AS EndLine,
+                   end_column AS EndColumn, signature, documentation, modifiers,
+                   parent_symbol_id AS ParentSymbolId, indexed_at AS IndexedAt
+            FROM symbols
+            WHERE id = ANY(@Ids)";
+
+        return await _db.QueryAsync<Symbol>(sql, new { Ids = ids }, cancellationToken);
+    }
+
     public async Task<IEnumerable<Symbol>> GetByFileAsync(string repoId, string branchName, string filePath, CancellationToken cancellationToken = default)
     {
         const string sql = @"
@@ -227,4 +247,3 @@ public sealed class SymbolRepository : ISymbolRepository
         return rowsAffected;
     }
 }
-

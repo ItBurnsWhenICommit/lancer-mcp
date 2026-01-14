@@ -16,6 +16,7 @@ public sealed class QueryOrchestrator
     private readonly ICodeChunkRepository _chunkRepository;
     private readonly IEmbeddingRepository _embeddingRepository;
     private readonly ISymbolRepository _symbolRepository;
+    private readonly ISymbolSearchRepository _symbolSearchRepository;
     private readonly IEdgeRepository _edgeRepository;
     private readonly EmbeddingService _embeddingService;
     private readonly IOptionsMonitor<ServerOptions> _options;
@@ -91,6 +92,7 @@ public sealed class QueryOrchestrator
         ICodeChunkRepository chunkRepository,
         IEmbeddingRepository embeddingRepository,
         ISymbolRepository symbolRepository,
+        ISymbolSearchRepository symbolSearchRepository,
         IEdgeRepository edgeRepository,
         EmbeddingService embeddingService,
         IOptionsMonitor<ServerOptions> options)
@@ -99,6 +101,7 @@ public sealed class QueryOrchestrator
         _chunkRepository = chunkRepository;
         _embeddingRepository = embeddingRepository;
         _symbolRepository = symbolRepository;
+        _symbolSearchRepository = symbolSearchRepository;
         _edgeRepository = edgeRepository;
         _embeddingService = embeddingService;
         _options = options;
@@ -332,6 +335,31 @@ public sealed class QueryOrchestrator
         CancellationToken cancellationToken)
     {
         List<SearchResult> results;
+
+        if (parsedQuery.Profile == RetrievalProfile.Fast)
+        {
+            switch (parsedQuery.Intent)
+            {
+                case QueryIntent.Navigation:
+                    results = await ExecuteNavigationSearchAsync(parsedQuery, cancellationToken);
+                    if (!results.Any())
+                    {
+                        results = await ExecuteFastSearchAsync(parsedQuery, cancellationToken);
+                    }
+                    return results;
+
+                case QueryIntent.Relations:
+                    results = await ExecuteRelationsSearchAsync(parsedQuery, cancellationToken);
+                    if (!results.Any())
+                    {
+                        results = await ExecuteFastSearchAsync(parsedQuery, cancellationToken);
+                    }
+                    return results;
+
+                default:
+                    return await ExecuteFastSearchAsync(parsedQuery, cancellationToken);
+            }
+        }
 
         switch (parsedQuery.Intent)
         {
@@ -717,6 +745,92 @@ public sealed class QueryOrchestrator
         };
 
         return incomingPatterns.Any(pattern => Regex.IsMatch(lowerQuery, pattern));
+    }
+
+    /// <summary>
+    /// Execute fast search (symbol search + lightweight reranking).
+    /// </summary>
+    private async Task<List<SearchResult>> ExecuteFastSearchAsync(
+        ParsedQuery parsedQuery,
+        CancellationToken cancellationToken)
+    {
+        var results = new List<SearchResult>();
+
+        var repoId = parsedQuery.RepositoryName ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(repoId))
+        {
+            return results;
+        }
+
+        var matches = await _symbolSearchRepository.SearchAsync(
+            repoId,
+            parsedQuery.OriginalQuery,
+            parsedQuery.BranchName,
+            parsedQuery.MaxResults * 2,
+            cancellationToken);
+
+        var matchList = matches.ToList();
+        if (matchList.Count == 0)
+        {
+            return results;
+        }
+
+        var symbolIds = matchList.Select(m => m.SymbolId).Distinct().ToList();
+        var symbols = await _symbolRepository.GetByIdsAsync(symbolIds, cancellationToken);
+        var symbolLookup = symbols.ToDictionary(s => s.Id, s => s);
+        var reasons = BuildReasons(parsedQuery);
+
+        foreach (var match in matchList)
+        {
+            if (!symbolLookup.TryGetValue(match.SymbolId, out var symbol))
+            {
+                continue;
+            }
+
+            var snippet = string.IsNullOrWhiteSpace(match.Snippet) ? null : match.Snippet;
+            results.Add(new SearchResult
+            {
+                Id = symbol.Id,
+                Type = "symbol",
+                Repository = symbol.RepositoryName,
+                Branch = symbol.BranchName,
+                FilePath = symbol.FilePath,
+                Language = symbol.Language,
+                SymbolName = symbol.Name,
+                SymbolKind = symbol.Kind,
+                Content = snippet ?? symbol.Signature ?? $"{symbol.Kind} {symbol.Name}",
+                StartLine = symbol.StartLine,
+                EndLine = symbol.EndLine,
+                Score = match.Score,
+                Signature = symbol.Signature,
+                Documentation = symbol.Documentation,
+                Reasons = reasons.Count == 0 ? null : new List<string>(reasons)
+            });
+        }
+
+        if (parsedQuery.IncludeRelated && results.Count > 0)
+        {
+            results = await ApplyGraphReRankingAsync(results, parsedQuery, cancellationToken);
+        }
+
+        return results;
+    }
+
+    private static List<string> BuildReasons(ParsedQuery parsedQuery)
+    {
+        var reasons = new List<string>();
+
+        foreach (var keyword in parsedQuery.Keywords.Take(3))
+        {
+            reasons.Add($"match:{keyword}");
+        }
+
+        if (parsedQuery.SymbolNames?.Count > 0)
+        {
+            reasons.Add($"symbol:{parsedQuery.SymbolNames[0]}");
+        }
+
+        return reasons;
     }
 
     /// <summary>

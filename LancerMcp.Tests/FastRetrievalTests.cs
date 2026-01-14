@@ -9,49 +9,74 @@ using Xunit;
 
 namespace LancerMcp.Tests;
 
-public sealed class QueryProfileSelectionTests
+public sealed class FastRetrievalTests
 {
     [Fact]
-    public async Task QueryAsync_DefaultsToFastProfile()
+    public async Task FastProfile_ReturnsSymbolResultsWithWhySignals()
     {
         var options = new ServerOptions { DefaultRetrievalProfile = RetrievalProfile.Fast };
         var optionsMonitor = new TestOptionsMonitor(options);
+        var symbolSearchRepository = new FakeSymbolSearchRepository();
+        var symbolRepository = new FakeSymbolRepository();
+
         var orchestrator = new QueryOrchestrator(
             NullLogger<QueryOrchestrator>.Instance,
             new ThrowingCodeChunkRepository(),
             new ThrowingEmbeddingRepository(),
-            new ReturningSymbolRepository(),
-            new ThrowingSymbolSearchRepository(),
+            symbolRepository,
+            symbolSearchRepository,
             new ThrowingEdgeRepository(),
             new EmbeddingService(new HttpClient(), optionsMonitor, NullLogger<EmbeddingService>.Instance),
             optionsMonitor);
 
         var response = await orchestrator.QueryAsync(
-            query: "find UserService",
+            query: "user service login",
             repositoryName: "repo",
-            branchName: "main");
+            branchName: "main",
+            profileOverride: RetrievalProfile.Fast);
 
-        Assert.NotNull(response.Metadata);
-        Assert.Equal("Fast", response.Metadata?["profile"]?.ToString());
+        Assert.NotEmpty(response.Results);
+        Assert.All(response.Results, result =>
+            Assert.Contains(result.Reasons ?? new List<string>(), reason => reason.StartsWith("match:", StringComparison.Ordinal)));
     }
 
-    private sealed class ReturningSymbolRepository : ISymbolRepository
+    private sealed class FakeSymbolSearchRepository : ISymbolSearchRepository
     {
-        public Task<IEnumerable<Symbol>> SearchByNameAsync(string repoId, string query, string? branchName = null, bool fuzzy = false, int limit = 50, CancellationToken cancellationToken = default)
+        public Task<IEnumerable<(string SymbolId, float Score, string? Snippet)>> SearchAsync(
+            string repoId,
+            string query,
+            string? branchName,
+            int limit,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<IEnumerable<(string, float, string?)>>(new[]
+            {
+                ("sym1", 0.9f, (string?)"public void Login() { }")
+            });
+        }
+
+        public Task<int> CreateBatchAsync(IEnumerable<SymbolSearchEntry> entries, CancellationToken cancellationToken = default)
+            => Task.FromResult(0);
+    }
+
+    private sealed class FakeSymbolRepository : ISymbolRepository
+    {
+        public Task<IEnumerable<Symbol>> GetByIdsAsync(IEnumerable<string> symbolIds, CancellationToken cancellationToken = default)
         {
             var symbol = new Symbol
             {
-                RepositoryName = repoId,
-                BranchName = branchName ?? "main",
+                Id = "sym1",
+                RepositoryName = "repo",
+                BranchName = "main",
                 CommitSha = "sha",
-                FilePath = "src/UserService.cs",
-                Name = "UserService",
-                QualifiedName = "Demo.UserService",
-                Kind = SymbolKind.Class,
+                FilePath = "AuthService.cs",
+                Name = "Login",
+                QualifiedName = "Demo.AuthService.Login",
+                Kind = SymbolKind.Method,
                 Language = Language.CSharp,
                 StartLine = 1,
                 StartColumn = 1,
-                EndLine = 5,
+                EndLine = 3,
                 EndColumn = 1
             };
 
@@ -59,9 +84,9 @@ public sealed class QueryProfileSelectionTests
         }
 
         public Task<Symbol?> GetByIdAsync(string id, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<IEnumerable<Symbol>> GetByIdsAsync(IEnumerable<string> symbolIds, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IEnumerable<Symbol>> GetByFileAsync(string repoId, string branchName, string filePath, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IEnumerable<Symbol>> GetByBranchAsync(string repoId, string branchName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IEnumerable<Symbol>> SearchByNameAsync(string repoId, string query, string? branchName = null, bool fuzzy = false, int limit = 50, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IEnumerable<Symbol>> GetByKindAsync(string repoId, SymbolKind kind, int limit = 100, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<Symbol> CreateAsync(Symbol symbol, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<int> CreateBatchAsync(IEnumerable<Symbol> symbols, CancellationToken cancellationToken = default) => throw new NotImplementedException();
@@ -102,15 +127,6 @@ public sealed class QueryProfileSelectionTests
         public Task<int> DeleteByBranchAsync(string repoId, string branchName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<int> GetCountAsync(string repoId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<bool> ExistsForChunkAsync(string chunkId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    }
-
-    private sealed class ThrowingSymbolSearchRepository : ISymbolSearchRepository
-    {
-        public Task<IEnumerable<(string SymbolId, float Score, string? Snippet)>> SearchAsync(string repoId, string query, string? branchName, int limit, CancellationToken cancellationToken = default)
-            => throw new NotImplementedException();
-
-        public Task<int> CreateBatchAsync(IEnumerable<SymbolSearchEntry> entries, CancellationToken cancellationToken = default)
-            => throw new NotImplementedException();
     }
 
     private sealed class ThrowingEdgeRepository : IEdgeRepository

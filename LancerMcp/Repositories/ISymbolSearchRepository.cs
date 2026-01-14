@@ -10,7 +10,7 @@ public interface ISymbolSearchRepository
     /// <summary>
     /// Searches symbol entries using full-text search.
     /// </summary>
-    Task<IEnumerable<(string SymbolId, float Score)>> SearchAsync(
+    Task<IEnumerable<(string SymbolId, float Score, string? Snippet)>> SearchAsync(
         string repoId,
         string query,
         string? branchName,

@@ -44,6 +44,7 @@ public class QueryOrchestratorEndToEndTests : FixtureTestBase
         );
 
         _symbolRepository = new SymbolRepository(databaseService, NullLogger<SymbolRepository>.Instance);
+        var symbolSearchRepository = new SymbolSearchRepository(databaseService, NullLogger<SymbolSearchRepository>.Instance);
         _edgeRepository = new EdgeRepository(databaseService, NullLogger<EdgeRepository>.Instance);
         _chunkRepository = new CodeChunkRepository(databaseService, NullLogger<CodeChunkRepository>.Instance);
         _embeddingRepository = new EmbeddingRepository(databaseService, NullLogger<EmbeddingRepository>.Instance);
@@ -65,6 +66,7 @@ public class QueryOrchestratorEndToEndTests : FixtureTestBase
             _chunkRepository,
             _embeddingRepository,
             _symbolRepository,
+            symbolSearchRepository,
             _edgeRepository,
             embeddingService,
             optionsMonitor
