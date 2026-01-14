@@ -43,6 +43,21 @@ public sealed class ServerOptions
     public int MaxResults { get; set; } = 50;
 
     /// <summary>
+    /// Maximum number of results in query responses.
+    /// </summary>
+    public int MaxResponseResults { get; set; } = 10;
+
+    /// <summary>
+    /// Maximum total snippet characters across all query results.
+    /// </summary>
+    public int MaxResponseSnippetChars { get; set; } = 8000;
+
+    /// <summary>
+    /// Maximum serialized JSON response size in bytes.
+    /// </summary>
+    public int MaxResponseBytes { get; set; } = 16384;
+
+    /// <summary>
     /// Optional override for the HTTP port. The ASP.NET host configuration controls the actual binding.
     /// </summary>
     public int? Port { get; set; }

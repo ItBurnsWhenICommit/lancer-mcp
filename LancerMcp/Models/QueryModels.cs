@@ -1,3 +1,6 @@
+using System.Text;
+using System.Text.Json;
+
 namespace LancerMcp.Models;
 
 /// <summary>
@@ -220,6 +223,27 @@ public sealed class RelatedSymbol
 }
 
 /// <summary>
+/// Payload compaction options for query responses.
+/// </summary>
+public sealed class QueryResponseCompactionOptions
+{
+    /// <summary>
+    /// Maximum number of results to include.
+    /// </summary>
+    public int MaxResults { get; init; } = 10;
+
+    /// <summary>
+    /// Maximum total characters of snippet content across all results.
+    /// </summary>
+    public int MaxSnippetChars { get; init; } = 8000;
+
+    /// <summary>
+    /// Maximum serialized JSON size in bytes.
+    /// </summary>
+    public int MaxJsonBytes { get; init; } = 16384;
+}
+
+/// <summary>
 /// Represents the complete query response with context.
 /// </summary>
 public sealed class QueryResponse
@@ -264,12 +288,113 @@ public sealed class QueryResponse
     /// Removes redundant fields (repository/branch duplicated per result, always-null scores, internal IDs).
     /// Shortens field names for minimal payload size.
     /// </summary>
-    public object ToOptimizedFormat()
+    public object ToOptimizedFormat(QueryResponseCompactionOptions? options = null)
     {
-        // Extract repository and branch from metadata (single-repo queries)
-        var repository = Metadata?.TryGetValue("repository", out var repo) == true ? repo?.ToString() : "unknown";
-        var branch = Metadata?.TryGetValue("branch", out var br) == true ? br?.ToString() : "unknown";
+        var limits = options ?? new QueryResponseCompactionOptions();
 
+        // Extract repository and branch from metadata (single-repo queries)
+        var repository = Metadata?.TryGetValue("repository", out var repo) == true ? repo?.ToString() ?? "unknown" : "unknown";
+        var branch = Metadata?.TryGetValue("branch", out var br) == true ? br?.ToString() ?? "unknown" : "unknown";
+
+        var trimmedResults = Results
+            .Take(limits.MaxResults)
+            .Select(BuildMinimalResult)
+            .ToList();
+
+        ApplySnippetBudget(trimmedResults, limits.MaxSnippetChars);
+
+        var payload = BuildPayload(repository, branch, trimmedResults);
+        if (limits.MaxJsonBytes > 0)
+        {
+            payload = EnsureJsonSize(repository, branch, trimmedResults, limits.MaxJsonBytes);
+        }
+
+        return payload;
+    }
+
+    private Dictionary<string, object?> BuildMinimalResult(SearchResult result)
+    {
+        var minimalResult = new Dictionary<string, object?>
+        {
+            ["file"] = result.FilePath,
+            ["lines"] = $"{result.StartLine}-{result.EndLine}",
+            ["score"] = Math.Round(result.Score, 2),
+            ["type"] = result.Type
+        };
+
+        if (!string.IsNullOrEmpty(result.SymbolName))
+        {
+            minimalResult["symbol"] = result.SymbolName;
+            if (result.SymbolKind.HasValue)
+            {
+                minimalResult["kind"] = result.SymbolKind.Value.ToString();
+            }
+        }
+
+        if (!string.IsNullOrEmpty(result.Signature))
+        {
+            minimalResult["sig"] = result.Signature;
+        }
+        else if (!string.IsNullOrEmpty(result.Content))
+        {
+            minimalResult["content"] = result.Content;
+        }
+
+        if (!string.IsNullOrEmpty(result.Documentation))
+        {
+            minimalResult["docs"] = result.Documentation;
+        }
+
+        if (result.GraphScore.HasValue && result.GraphScore.Value > 0)
+        {
+            minimalResult["graphScore"] = Math.Round(result.GraphScore.Value, 2);
+        }
+
+        if (result.RelatedSymbols?.Count > 0)
+        {
+            minimalResult["related"] = result.RelatedSymbols.Select(rs => new
+            {
+                name = rs.Name,
+                kind = rs.Kind.ToString(),
+                rel = rs.RelationType,
+                file = rs.FilePath,
+                line = rs.Line
+            }).ToArray();
+        }
+
+        return minimalResult;
+    }
+
+    private static void ApplySnippetBudget(List<Dictionary<string, object?>> results, int maxSnippetChars)
+    {
+        var remaining = maxSnippetChars;
+
+        foreach (var result in results)
+        {
+            if (!result.TryGetValue("content", out var contentValue) || contentValue is not string content)
+            {
+                continue;
+            }
+
+            if (remaining <= 0)
+            {
+                result.Remove("content");
+                continue;
+            }
+
+            if (content.Length > remaining)
+            {
+                result["content"] = content[..remaining];
+                remaining = 0;
+                continue;
+            }
+
+            remaining -= content.Length;
+        }
+    }
+
+    private object BuildPayload(string repository, string branch, IReadOnlyList<Dictionary<string, object?>> results)
+    {
         return new
         {
             repo = repository,
@@ -277,57 +402,31 @@ public sealed class QueryResponse
             query = Query,
             intent = Intent.ToString(),
             total = TotalResults,
-            results = Results.Select(r =>
-            {
-                // Build minimal result object - only include non-null, relevant fields
-                var minimalResult = new Dictionary<string, object?>
-                {
-                    ["file"] = r.FilePath,
-                    ["lines"] = $"{r.StartLine}-{r.EndLine}",
-                    ["score"] = Math.Round(r.Score, 2),
-                    ["type"] = r.Type
-                };
-
-                // Add symbol info if present
-                if (!string.IsNullOrEmpty(r.SymbolName))
-                {
-                    minimalResult["symbol"] = r.SymbolName;
-                    if (r.SymbolKind.HasValue)
-                        minimalResult["kind"] = r.SymbolKind.Value.ToString();
-                }
-
-                // Add signature if present (more useful than full content for symbols)
-                if (!string.IsNullOrEmpty(r.Signature))
-                    minimalResult["sig"] = r.Signature;
-                else if (!string.IsNullOrEmpty(r.Content))
-                    minimalResult["content"] = r.Content;
-
-                // Add documentation if present
-                if (!string.IsNullOrEmpty(r.Documentation))
-                    minimalResult["docs"] = r.Documentation;
-
-                // Add graph score if present (only meaningful score component)
-                if (r.GraphScore.HasValue && r.GraphScore.Value > 0)
-                    minimalResult["graphScore"] = Math.Round(r.GraphScore.Value, 2);
-
-                // Add related symbols if present (for call graphs, references, etc.)
-                if (r.RelatedSymbols?.Count > 0)
-                {
-                    minimalResult["related"] = r.RelatedSymbols.Select(rs => new
-                    {
-                        name = rs.Name,
-                        kind = rs.Kind.ToString(),
-                        rel = rs.RelationType,
-                        file = rs.FilePath,
-                        line = rs.Line
-                    }).ToArray();
-                }
-
-                return minimalResult;
-            }).ToArray(),
+            results = results.ToArray(),
             time = ExecutionTimeMs,
             suggestions = SuggestedQueries
         };
+    }
+
+    private object EnsureJsonSize(
+        string repository,
+        string branch,
+        List<Dictionary<string, object?>> results,
+        int maxJsonBytes)
+    {
+        var trimmedResults = results;
+
+        while (true)
+        {
+            var payload = BuildPayload(repository, branch, trimmedResults);
+            var jsonBytes = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(payload));
+            if (jsonBytes <= maxJsonBytes || trimmedResults.Count == 0)
+            {
+                return payload;
+            }
+
+            trimmedResults = trimmedResults.Take(trimmedResults.Count - 1).ToList();
+        }
     }
 }
 
