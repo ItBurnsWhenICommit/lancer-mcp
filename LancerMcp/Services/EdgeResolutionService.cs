@@ -119,6 +119,7 @@ public sealed class EdgeResolutionService
             if (targetQualifiedNameBases.Count > 0)
             {
                 var patterns = targetQualifiedNameBases
+                    // Match bare qualified name and the same name with parameters (e.g., Method(System.Int32)).
                     .SelectMany(name => new[] { name, $"{name}(%"})
                     .Distinct()
                     .ToList();
@@ -191,47 +192,50 @@ public sealed class EdgeResolutionService
                         _logger.LogDebug("Resolved edge target '{OriginalTarget}' -> '{NormalizedTarget}' to symbol ID {SymbolId} (database)",
                             edge.TargetSymbolId, normalizedTarget, resolvedId);
                     }
-                    var strippedTarget = NormalizeQualifiedName(targetId, stripParameters: true);
-                    if (TryResolveByStrippedName(
-                            strippedTarget,
-                            currentBatchStrippedLookup,
-                            databaseStrippedLookup,
-                            edge.RepositoryName,
-                            edge.BranchName,
-                            out resolvedId))
-                    {
-                        targetId = resolvedId;
-                        wasResolved = true;
-                        _logger.LogDebug("Resolved edge target '{OriginalTarget}' -> '{NormalizedTarget}' to symbol ID {SymbolId} (stripped fallback)",
-                            edge.TargetSymbolId, strippedTarget, resolvedId);
-                    }
-                    // Fallback: resolve simple method names within the same parent symbol
-                    else if (currentBatchById.TryGetValue(edge.SourceSymbolId, out var sourceSymbol) &&
-                             !string.IsNullOrWhiteSpace(sourceSymbol.ParentSymbolId))
-                    {
-                        var simpleName = ExtractSimpleName(strippedTarget);
-                        if (!string.IsNullOrEmpty(simpleName))
-                        {
-                            var localMatch = currentBatchSymbols.FirstOrDefault(s =>
-                                s.ParentSymbolId == sourceSymbol.ParentSymbolId &&
-                                string.Equals(s.Name, simpleName, StringComparison.OrdinalIgnoreCase));
-
-                            if (localMatch != null)
-                            {
-                                targetId = localMatch.Id;
-                                wasResolved = true;
-                                _logger.LogDebug("Resolved edge target '{OriginalTarget}' -> '{SimpleName}' to symbol ID {SymbolId} (local fallback)",
-                                    edge.TargetSymbolId, simpleName, localMatch.Id);
-                            }
-                        }
-                    }
-                    // If still not resolved, skip this edge (external reference)
                     else
                     {
-                        _logger.LogDebug("Could not resolve edge target '{OriginalTarget}' -> '{NormalizedTarget}' in {Repo}/{Branch} (external reference or missing symbol)",
-                            edge.TargetSymbolId, normalizedTarget, edge.RepositoryName, edge.BranchName);
-                        // Skip edges to external symbols (framework types, etc.)
-                        continue;
+                        var strippedTarget = NormalizeQualifiedName(targetId, stripParameters: true);
+                        if (TryResolveByStrippedName(
+                                strippedTarget,
+                                currentBatchStrippedLookup,
+                                databaseStrippedLookup,
+                                edge.RepositoryName,
+                                edge.BranchName,
+                                out resolvedId))
+                        {
+                            targetId = resolvedId;
+                            wasResolved = true;
+                            _logger.LogDebug("Resolved edge target '{OriginalTarget}' -> '{NormalizedTarget}' to symbol ID {SymbolId} (stripped fallback)",
+                                edge.TargetSymbolId, strippedTarget, resolvedId);
+                        }
+                        // Fallback: resolve simple method names within the same parent symbol
+                        else if (currentBatchById.TryGetValue(edge.SourceSymbolId, out var sourceSymbol) &&
+                                 !string.IsNullOrWhiteSpace(sourceSymbol.ParentSymbolId))
+                        {
+                            var simpleName = ExtractSimpleName(strippedTarget);
+                            if (!string.IsNullOrEmpty(simpleName))
+                            {
+                                var localMatch = currentBatchSymbols.FirstOrDefault(s =>
+                                    s.ParentSymbolId == sourceSymbol.ParentSymbolId &&
+                                    string.Equals(s.Name, simpleName, StringComparison.OrdinalIgnoreCase));
+
+                                if (localMatch != null)
+                                {
+                                    targetId = localMatch.Id;
+                                    wasResolved = true;
+                                    _logger.LogDebug("Resolved edge target '{OriginalTarget}' -> '{SimpleName}' to symbol ID {SymbolId} (local fallback)",
+                                        edge.TargetSymbolId, simpleName, localMatch.Id);
+                                }
+                            }
+                        }
+                        // If still not resolved, skip this edge (external reference)
+                        else
+                        {
+                            _logger.LogDebug("Could not resolve edge target '{OriginalTarget}' -> '{NormalizedTarget}' in {Repo}/{Branch} (external reference or missing symbol)",
+                                edge.TargetSymbolId, normalizedTarget, edge.RepositoryName, edge.BranchName);
+                            // Skip edges to external symbols (framework types, etc.)
+                            continue;
+                        }
                     }
                 }
             }
