@@ -296,7 +296,8 @@ public sealed class RoslynParserService
         public override void VisitMethodDeclaration(MethodDeclarationSyntax node)
         {
             var signature = $"{node.Identifier.Text}({string.Join(", ", node.ParameterList.Parameters.Select(p => $"{p.Type} {p.Identifier}"))})";
-            var symbol = CreateSymbol(node.Identifier, Models.SymbolKind.Method, node, node.Modifiers, signature);
+            var literalTokens = ExtractLiteralTokens(node.Body, node.ExpressionBody);
+            var symbol = CreateSymbol(node.Identifier, Models.SymbolKind.Method, node, node.Modifiers, signature, literalTokens);
 
             // Extract return type edge
             ExtractTypeEdge(node.ReturnType, symbol.Id, EdgeKind.Returns);
@@ -313,7 +314,8 @@ public sealed class RoslynParserService
         public override void VisitConstructorDeclaration(ConstructorDeclarationSyntax node)
         {
             var signature = $"{node.Identifier.Text}({string.Join(", ", node.ParameterList.Parameters.Select(p => $"{p.Type} {p.Identifier}"))})";
-            var symbol = CreateSymbol(node.Identifier, Models.SymbolKind.Constructor, node, node.Modifiers, signature);
+            var literalTokens = ExtractLiteralTokens(node.Body, node.ExpressionBody);
+            var symbol = CreateSymbol(node.Identifier, Models.SymbolKind.Constructor, node, node.Modifiers, signature, literalTokens);
 
             // Extract parameter type edges
             ExtractParameterTypeEdges(node.ParameterList, symbol.Id);
@@ -355,7 +357,8 @@ public sealed class RoslynParserService
             Models.SymbolKind kind,
             SyntaxNode node,
             SyntaxTokenList? modifiers = null,
-            string? signature = null)
+            string? signature = null,
+            IReadOnlyList<string>? literalTokens = null)
         {
             var lineSpan = node.GetLocation().GetLineSpan();
             var symbolInfo = _semanticModel.GetDeclaredSymbol(node);
@@ -375,6 +378,7 @@ public sealed class RoslynParserService
                 EndLine = lineSpan.EndLinePosition.Line + 1,
                 EndColumn = lineSpan.EndLinePosition.Character + 1,
                 Signature = signature,
+                LiteralTokens = literalTokens?.ToArray(),
                 Modifiers = modifiers?.Select(m => m.Text).ToArray(),
                 ParentSymbolId = _parentSymbolIds.Count > 0 ? _parentSymbolIds.Peek() : null
             };
@@ -393,7 +397,8 @@ public sealed class RoslynParserService
         private Symbol CreateSymbol(
             NameSyntax name,
             Models.SymbolKind kind,
-            SyntaxNode node)
+            SyntaxNode node,
+            IReadOnlyList<string>? literalTokens = null)
         {
             var lineSpan = node.GetLocation().GetLineSpan();
             var symbolInfo = _semanticModel.GetDeclaredSymbol(node);
@@ -412,6 +417,7 @@ public sealed class RoslynParserService
                 StartColumn = lineSpan.StartLinePosition.Character + 1,
                 EndLine = lineSpan.EndLinePosition.Line + 1,
                 EndColumn = lineSpan.EndLinePosition.Character + 1,
+                LiteralTokens = literalTokens?.ToArray(),
                 ParentSymbolId = _parentSymbolIds.Count > 0 ? _parentSymbolIds.Peek() : null
             };
 
@@ -628,6 +634,39 @@ public sealed class RoslynParserService
                     ExtractTypeEdge(parameter.Type, sourceSymbolId, EdgeKind.TypeOf);
                 }
             }
+        }
+
+        private static IReadOnlyList<string> ExtractLiteralTokens(params SyntaxNode?[] nodes)
+        {
+            if (nodes.Length == 0)
+            {
+                return Array.Empty<string>();
+            }
+
+            var tokens = new HashSet<string>(StringComparer.Ordinal);
+
+            foreach (var node in nodes)
+            {
+                if (node == null)
+                {
+                    continue;
+                }
+
+                foreach (var literal in node.DescendantNodes().OfType<LiteralExpressionSyntax>())
+                {
+                    if (!literal.IsKind(SyntaxKind.StringLiteralExpression))
+                    {
+                        continue;
+                    }
+
+                    foreach (var token in SymbolTokenization.Tokenize(literal.Token.ValueText))
+                    {
+                        tokens.Add(token);
+                    }
+                }
+            }
+
+            return tokens.Count == 0 ? Array.Empty<string>() : tokens.ToList();
         }
     }
 
