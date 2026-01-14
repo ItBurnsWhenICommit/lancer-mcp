@@ -6,6 +6,8 @@
 dotnet run --project LancerMcp.Benchmark/LancerMcp.Benchmark.csproj
 ```
 
+Note: PostgreSQL must be running before executing the benchmark.
+
 ## Dataset
 
 - Default dataset: `testdata/csharp`
@@ -32,6 +34,7 @@ The benchmark uses the same environment variables as the main server:
 
 ## Baseline (Phase 0)
 
+- Baseline collected: 2026-01-14
 - Indexing time (ms): 2970
 - Peak memory (bytes): 188698624
 - DB size (bytes): 9875939

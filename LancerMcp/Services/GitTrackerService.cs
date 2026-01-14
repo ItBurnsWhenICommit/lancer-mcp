@@ -792,7 +792,7 @@ public sealed class GitTrackerService : IDisposable
                 AuthorName = commit.Author.Name,
                 AuthorEmail = commit.Author.Email,
                 CommitMessage = commit.Message,
-                CommittedAt = commit.Author.When
+                CommittedAt = commit.Author.When.ToUniversalTime()
             };
         }, cancellationToken);
     }

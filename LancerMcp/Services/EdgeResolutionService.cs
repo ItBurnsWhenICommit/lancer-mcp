@@ -44,6 +44,7 @@ public sealed class EdgeResolutionService
                 g => g.Key,
                 g => g.First().Id,
                 StringComparer.OrdinalIgnoreCase);
+        var currentBatchById = currentBatchSymbols.ToDictionary(s => s.Id);
 
         // Build lookup for database symbols (repo:branch:qualified_name -> symbol ID)
         // Group edges by repo/branch to scope queries and prevent cross-repo contamination
@@ -135,6 +136,26 @@ public sealed class EdgeResolutionService
                         _logger.LogDebug("Resolved edge target '{OriginalTarget}' -> '{NormalizedTarget}' to symbol ID {SymbolId} (database)",
                             edge.TargetSymbolId, normalizedTarget, resolvedId);
                     }
+                    // Fallback: resolve simple method names within the same parent symbol
+                    else if (currentBatchById.TryGetValue(edge.SourceSymbolId, out var sourceSymbol) &&
+                             !string.IsNullOrWhiteSpace(sourceSymbol.ParentSymbolId))
+                    {
+                        var simpleName = ExtractSimpleName(normalizedTarget);
+                        if (!string.IsNullOrEmpty(simpleName))
+                        {
+                            var localMatch = currentBatchSymbols.FirstOrDefault(s =>
+                                s.ParentSymbolId == sourceSymbol.ParentSymbolId &&
+                                string.Equals(s.Name, simpleName, StringComparison.OrdinalIgnoreCase));
+
+                            if (localMatch != null)
+                            {
+                                targetId = localMatch.Id;
+                                wasResolved = true;
+                                _logger.LogDebug("Resolved edge target '{OriginalTarget}' -> '{SimpleName}' to symbol ID {SymbolId} (local fallback)",
+                                    edge.TargetSymbolId, simpleName, localMatch.Id);
+                            }
+                        }
+                    }
                     // If still not resolved, skip this edge (external reference)
                     else
                     {
@@ -177,7 +198,29 @@ public sealed class EdgeResolutionService
     /// </summary>
     private static string NormalizeQualifiedName(string qualifiedName)
     {
-        return qualifiedName.Trim().ToLowerInvariant();
+        var trimmed = qualifiedName.Trim();
+        var parameterIndex = trimmed.IndexOf('(');
+        if (parameterIndex >= 0)
+        {
+            trimmed = trimmed[..parameterIndex];
+        }
+
+        return trimmed.ToLowerInvariant();
+    }
+
+    private static string ExtractSimpleName(string normalizedQualifiedName)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedQualifiedName))
+        {
+            return string.Empty;
+        }
+
+        var lastDot = normalizedQualifiedName.LastIndexOf('.');
+        if (lastDot >= 0 && lastDot + 1 < normalizedQualifiedName.Length)
+        {
+            return normalizedQualifiedName[(lastDot + 1)..];
+        }
+
+        return normalizedQualifiedName;
     }
 }
-
