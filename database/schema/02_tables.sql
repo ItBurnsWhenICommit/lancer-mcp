@@ -176,6 +176,29 @@ COMMENT ON TABLE symbol_search IS 'Sparse retrieval index for symbols (weighted 
 COMMENT ON COLUMN symbol_search.search_vector IS 'Weighted tsvector for token search';
 
 -- ============================================================================
+-- Symbol Fingerprints Table
+-- ============================================================================
+CREATE TABLE symbol_fingerprints (
+    symbol_id TEXT PRIMARY KEY REFERENCES symbols(id) ON DELETE CASCADE,
+    repo_id TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+    branch_name TEXT NOT NULL,
+    commit_sha TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    language language NOT NULL DEFAULT 'Unknown',
+    kind symbol_kind NOT NULL DEFAULT 'Unknown',
+    fingerprint_kind TEXT NOT NULL,
+    fingerprint BIGINT NOT NULL,
+    band0 INTEGER NOT NULL,
+    band1 INTEGER NOT NULL,
+    band2 INTEGER NOT NULL,
+    band3 INTEGER NOT NULL,
+    indexed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE symbol_fingerprints IS 'Symbol-level fingerprints for similarity search (SimHash)';
+COMMENT ON COLUMN symbol_fingerprints.fingerprint IS '64-bit fingerprint value stored as signed bigint';
+
+-- ============================================================================
 -- Edges Table (Symbol Relationships)
 -- ============================================================================
 CREATE TABLE edges (

@@ -273,6 +273,60 @@ public sealed class PersistenceService
     }
 
     /// <summary>
+    /// Persists symbol fingerprint entries in a batch within a transaction.
+    /// </summary>
+    public async Task CreateSymbolFingerprintBatchAsync(
+        Npgsql.NpgsqlConnection connection,
+        Npgsql.NpgsqlTransaction transaction,
+        List<SymbolFingerprintEntry> entries,
+        CancellationToken cancellationToken)
+    {
+        if (entries.Count == 0)
+        {
+            return;
+        }
+
+        const string sql = @"
+            INSERT INTO symbol_fingerprints (symbol_id, repo_id, branch_name, commit_sha, file_path, language, kind,
+                                             fingerprint_kind, fingerprint, band0, band1, band2, band3)
+            VALUES (@SymbolId, @RepositoryName, @BranchName, @CommitSha, @FilePath, @Language::language, @Kind::symbol_kind,
+                    @FingerprintKind, @Fingerprint, @Band0, @Band1, @Band2, @Band3)
+            ON CONFLICT (symbol_id) DO UPDATE
+            SET repo_id = EXCLUDED.repo_id,
+                branch_name = EXCLUDED.branch_name,
+                commit_sha = EXCLUDED.commit_sha,
+                file_path = EXCLUDED.file_path,
+                language = EXCLUDED.language,
+                kind = EXCLUDED.kind,
+                fingerprint_kind = EXCLUDED.fingerprint_kind,
+                fingerprint = EXCLUDED.fingerprint,
+                band0 = EXCLUDED.band0,
+                band1 = EXCLUDED.band1,
+                band2 = EXCLUDED.band2,
+                band3 = EXCLUDED.band3";
+
+        var entryList = entries.Select(entry => new
+        {
+            entry.SymbolId,
+            entry.RepositoryName,
+            entry.BranchName,
+            entry.CommitSha,
+            entry.FilePath,
+            Language = entry.Language.ToString(),
+            Kind = entry.Kind.ToString(),
+            entry.FingerprintKind,
+            Fingerprint = unchecked((long)entry.Fingerprint),
+            entry.Band0,
+            entry.Band1,
+            entry.Band2,
+            entry.Band3
+        }).ToList();
+
+        var command = new CommandDefinition(sql, entryList, transaction, cancellationToken: cancellationToken);
+        await connection.ExecuteAsync(command);
+    }
+
+    /// <summary>
     /// Persists code chunks in a batch within a transaction.
     /// </summary>
     public async Task CreateChunksBatchAsync(
