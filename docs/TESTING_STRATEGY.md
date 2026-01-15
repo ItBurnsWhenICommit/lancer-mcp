@@ -149,6 +149,14 @@ tests/fixtures/
 
 ## Running Integration Tests
 
+### Required setup
+
+Integration tests require restored fixtures and environment variables.
+- Run `./scripts/restore-fixtures.sh` to restore fixtures.
+- Export `TEST_WORKING_DIR` (required) and `TEST_DB_NAME` (default: lancer_test).
+- Export `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD` if not using defaults.
+
+
 ### Option 1: Using the Restore Script (Recommended)
 
 ```bash
