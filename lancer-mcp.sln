@@ -8,6 +8,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LancerMcp.Tests", "LancerMc
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LancerMcp.Benchmark", "LancerMcp.Benchmark\LancerMcp.Benchmark.csproj", "{62150DCB-790B-426B-A1C4-BFC637A759E3}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{55F9F2B1-0FF0-42D2-8622-18839826DF7B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LancerMcp.IntegrationTests", "tests\LancerMcp.IntegrationTests\LancerMcp.IntegrationTests.csproj", "{A953E7C9-7050-443E-A7D0-DE7523807B90}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -26,11 +30,18 @@ Global
 		{62150DCB-790B-426B-A1C4-BFC637A759E3}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{62150DCB-790B-426B-A1C4-BFC637A759E3}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{62150DCB-790B-426B-A1C4-BFC637A759E3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A953E7C9-7050-443E-A7D0-DE7523807B90}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A953E7C9-7050-443E-A7D0-DE7523807B90}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A953E7C9-7050-443E-A7D0-DE7523807B90}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A953E7C9-7050-443E-A7D0-DE7523807B90}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {75254FC2-E59A-4356-AD56-8F383F4CB483}
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{A953E7C9-7050-443E-A7D0-DE7523807B90} = {55F9F2B1-0FF0-42D2-8622-18839826DF7B}
 	EndGlobalSection
 EndGlobal

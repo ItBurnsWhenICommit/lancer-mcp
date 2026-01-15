@@ -172,7 +172,7 @@ static string PrepareSourceRepository(string testdataRoot, string branchName)
     }
 
     Directory.CreateDirectory(repoRoot);
-    CopyDirectory(testdataRoot, repoRoot);
+    BenchmarkCorpusCopier.CopyFiltered(testdataRoot, repoRoot);
 
     Repository.Init(repoRoot);
     using var repo = new Repository(repoRoot);
@@ -189,21 +189,6 @@ static string PrepareSourceRepository(string testdataRoot, string branchName)
     return repoRoot;
 }
 
-static void CopyDirectory(string source, string destination)
-{
-    foreach (var directory in Directory.GetDirectories(source, "*", SearchOption.AllDirectories))
-    {
-        var targetDir = directory.Replace(source, destination);
-        Directory.CreateDirectory(targetDir);
-    }
-
-    foreach (var file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
-    {
-        var targetFile = file.Replace(source, destination);
-        Directory.CreateDirectory(Path.GetDirectoryName(targetFile)!);
-        File.Copy(file, targetFile, overwrite: true);
-    }
-}
 
 internal sealed class SimpleOptionsMonitor : IOptionsMonitor<ServerOptions>
 {
