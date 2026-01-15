@@ -149,6 +149,64 @@ public sealed class QueryOrchestrator
                 queryEmbeddingModel,
                 maxDims: 4096);
 
+            string? resolvedEmbeddingModel = null;
+            string? embeddingErrorCode = null;
+            string? embeddingError = null;
+
+            if (embeddingParse.Success)
+            {
+                if (!string.IsNullOrWhiteSpace(embeddingParse.Model))
+                {
+                    resolvedEmbeddingModel = embeddingParse.Model;
+                }
+                else if (!string.IsNullOrWhiteSpace(_options.CurrentValue.EmbeddingModel))
+                {
+                    resolvedEmbeddingModel = _options.CurrentValue.EmbeddingModel.Trim().ToLowerInvariant();
+                }
+                else
+                {
+                    var models = await _embeddingRepository.GetModelsAsync(repositoryName, branchName, cancellationToken);
+                    if (models.Count == 1)
+                    {
+                        resolvedEmbeddingModel = models[0];
+                    }
+                    else
+                    {
+                        embeddingErrorCode = "embedding_model_ambiguous";
+                        embeddingError = "Multiple embedding models found; specify queryEmbeddingModel.";
+                    }
+                }
+
+                if (resolvedEmbeddingModel != null && embeddingErrorCode == null)
+                {
+                    var hasEmbeddings = await _embeddingRepository.HasAnyEmbeddingsAsync(
+                        repositoryName,
+                        branchName,
+                        resolvedEmbeddingModel,
+                        cancellationToken);
+
+                    if (!hasEmbeddings)
+                    {
+                        embeddingErrorCode = "embedding_model_not_found";
+                        embeddingError = $"No embeddings found for model '{resolvedEmbeddingModel}'.";
+                    }
+                    else
+                    {
+                        var modelDims = await _embeddingRepository.GetModelDimsAsync(
+                            repositoryName,
+                            branchName,
+                            resolvedEmbeddingModel,
+                            cancellationToken);
+
+                        if (modelDims.HasValue && embeddingParse.Vector != null && modelDims.Value != embeddingParse.Vector.Length)
+                        {
+                            embeddingErrorCode = "embedding_dims_mismatch";
+                            embeddingError = "Query embedding dims do not match stored embeddings.";
+                        }
+                    }
+                }
+            }
+
             // Step 2: Execute search based on intent
             Dictionary<string, object>? errorMetadata = null;
             List<SearchResult> results;
@@ -191,10 +249,20 @@ public sealed class QueryOrchestrator
                 _ => "fast"
             };
 
+            if (resolvedEmbeddingModel != null)
+            {
+                metadata["embeddingModel"] = resolvedEmbeddingModel;
+            }
+
             if (!embeddingParse.Success && parsedQuery.Profile != RetrievalProfile.Fast)
             {
                 metadata["errorCode"] = embeddingParse.ErrorCode!;
                 metadata["error"] = embeddingParse.Error!;
+            }
+            else if (embeddingErrorCode != null && parsedQuery.Profile != RetrievalProfile.Fast)
+            {
+                metadata["errorCode"] = embeddingErrorCode;
+                metadata["error"] = embeddingError ?? string.Empty;
             }
 
             if (errorMetadata != null)

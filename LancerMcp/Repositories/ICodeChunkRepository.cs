@@ -150,5 +150,19 @@ public interface IEmbeddingRepository
     /// Checks if an embedding exists for a chunk.
     /// </summary>
     Task<bool> ExistsForChunkAsync(string chunkId, CancellationToken cancellationToken = default);
-}
 
+    /// <summary>
+    /// Gets distinct embedding models for a repository/branch.
+    /// </summary>
+    Task<IReadOnlyList<string>> GetModelsAsync(string repoId, string? branchName = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets embedding dimensions for a repository/branch and model.
+    /// </summary>
+    Task<int?> GetModelDimsAsync(string repoId, string? branchName, string model, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Checks if any embeddings exist for a repository/branch and model.
+    /// </summary>
+    Task<bool> HasAnyEmbeddingsAsync(string repoId, string? branchName, string model, CancellationToken cancellationToken = default);
+}
