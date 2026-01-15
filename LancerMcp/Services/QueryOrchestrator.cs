@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Numerics;
 using System.Text.RegularExpressions;
 using LancerMcp.Configuration;
 using LancerMcp.Models;
@@ -12,12 +13,15 @@ namespace LancerMcp.Services;
 /// </summary>
 public sealed class QueryOrchestrator
 {
+    private const int SimilarityCandidateLimit = 2000;
+    private const int SimilarityTopK = 10;
     private readonly ILogger<QueryOrchestrator> _logger;
     private readonly ICodeChunkRepository _chunkRepository;
     private readonly IEmbeddingRepository _embeddingRepository;
     private readonly ISymbolRepository _symbolRepository;
     private readonly ISymbolSearchRepository _symbolSearchRepository;
     private readonly IEdgeRepository _edgeRepository;
+    private readonly ISymbolFingerprintRepository _fingerprintRepository;
     private readonly EmbeddingService _embeddingService;
     private readonly IOptionsMonitor<ServerOptions> _options;
 
@@ -94,6 +98,7 @@ public sealed class QueryOrchestrator
         ISymbolRepository symbolRepository,
         ISymbolSearchRepository symbolSearchRepository,
         IEdgeRepository edgeRepository,
+        ISymbolFingerprintRepository fingerprintRepository,
         EmbeddingService embeddingService,
         IOptionsMonitor<ServerOptions> options)
     {
@@ -103,6 +108,7 @@ public sealed class QueryOrchestrator
         _symbolRepository = symbolRepository;
         _symbolSearchRepository = symbolSearchRepository;
         _edgeRepository = edgeRepository;
+        _fingerprintRepository = fingerprintRepository;
         _embeddingService = embeddingService;
         _options = options;
     }
@@ -135,18 +141,46 @@ public sealed class QueryOrchestrator
             _logger.LogInformation("Query intent detected: {Intent} for repository: {Repository}", parsedQuery.Intent, repositoryName);
 
             // Step 2: Execute search based on intent
-            var results = await ExecuteSearchAsync(parsedQuery, cancellationToken);
+            Dictionary<string, object>? errorMetadata = null;
+            List<SearchResult> results;
 
-            // Step 3: Re-rank results if needed
-            if (parsedQuery.Intent == QueryIntent.Relations && parsedQuery.IncludeRelated)
+            if (parsedQuery.Intent == QueryIntent.Similar)
             {
-                results = await ApplyGraphReRankingAsync(results, parsedQuery, cancellationToken);
+                var similarityOutcome = await ExecuteSimilaritySearchAsync(parsedQuery, cancellationToken);
+                results = similarityOutcome.Results;
+                errorMetadata = similarityOutcome.Metadata;
+            }
+            else
+            {
+                results = await ExecuteSearchAsync(parsedQuery, cancellationToken);
+
+                // Step 3: Re-rank results if needed
+                if (parsedQuery.Intent == QueryIntent.Relations && parsedQuery.IncludeRelated)
+                {
+                    results = await ApplyGraphReRankingAsync(results, parsedQuery, cancellationToken);
+                }
             }
 
             // Step 4: Generate suggested follow-up queries
             var suggestedQueries = GenerateSuggestedQueries(parsedQuery, results);
 
             stopwatch.Stop();
+
+            var metadata = new Dictionary<string, object>
+            {
+                ["keywords"] = parsedQuery.Keywords,
+                ["repository"] = repositoryName,
+                ["branch"] = branchName ?? "all",
+                ["profile"] = parsedQuery.Profile.ToString()
+            };
+
+            if (errorMetadata != null)
+            {
+                foreach (var entry in errorMetadata)
+                {
+                    metadata[entry.Key] = entry.Value;
+                }
+            }
 
             return new QueryResponse
             {
@@ -156,13 +190,7 @@ public sealed class QueryOrchestrator
                 TotalResults = results.Count,
                 ExecutionTimeMs = stopwatch.ElapsedMilliseconds,
                 SuggestedQueries = suggestedQueries,
-                Metadata = new Dictionary<string, object>
-                {
-                    ["keywords"] = parsedQuery.Keywords,
-                    ["repository"] = repositoryName,
-                    ["branch"] = branchName ?? "all",
-                    ["profile"] = parsedQuery.Profile.ToString()
-                }
+                Metadata = metadata
             };
         }
         catch (Exception ex)
@@ -183,11 +211,21 @@ public sealed class QueryOrchestrator
         int maxResults,
         RetrievalProfile profile)
     {
-        // Detect intent
         var intent = DetectIntent(query);
+        string? similarSymbolId = null;
+        List<string>? similarTerms = null;
+        var keywordSource = query;
+
+        if (TryParseSimilarQuery(query, out var seedId, out var extraTerms))
+        {
+            intent = QueryIntent.Similar;
+            similarSymbolId = seedId;
+            similarTerms = extraTerms;
+            keywordSource = string.Join(' ', extraTerms);
+        }
 
         // Extract keywords (simple tokenization)
-        var keywords = ExtractKeywords(query);
+        var keywords = ExtractKeywords(keywordSource);
 
         // Extract symbol names (CamelCase or snake_case identifiers)
         var symbolNames = ExtractSymbolNames(query);
@@ -212,7 +250,9 @@ public sealed class QueryOrchestrator
             BranchName = branchName,
             IncludeRelated = includeRelated,
             MaxResults = maxResults,
-            Profile = profile
+            Profile = profile,
+            SimilarSymbolId = similarSymbolId,
+            SimilarTerms = similarTerms
         };
     }
 
@@ -222,6 +262,9 @@ public sealed class QueryOrchestrator
     /// </summary>
     private QueryIntent DetectIntent(string query)
     {
+        if (TryParseSimilarQuery(query, out _, out _))
+            return QueryIntent.Similar;
+
         // 1. Check for Relations intent first (most specific patterns)
         // Examples: "what calls X", "dependencies of Y", "who uses Z"
         if (RelationsPattern.IsMatch(query))
@@ -271,6 +314,217 @@ public sealed class QueryOrchestrator
         // This handles general queries like "authentication", "database connection", etc.
         return QueryIntent.Search;
     }
+
+    private async Task<SimilaritySearchOutcome> ExecuteSimilaritySearchAsync(
+        ParsedQuery parsedQuery,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(parsedQuery.SimilarSymbolId))
+        {
+            return SimilaritySearchOutcome.Error("seed_missing", "Similarity query missing seed symbol id.");
+        }
+
+        var seedSymbol = await _symbolRepository.GetByIdAsync(parsedQuery.SimilarSymbolId, cancellationToken);
+        if (seedSymbol == null)
+        {
+            return SimilaritySearchOutcome.Error("seed_not_found", $"Seed symbol '{parsedQuery.SimilarSymbolId}' not found.");
+        }
+
+        var fingerprint = await _fingerprintRepository.GetBySymbolIdAsync(seedSymbol.Id, cancellationToken);
+        if (fingerprint == null)
+        {
+            return SimilaritySearchOutcome.Error("seed_fingerprint_missing", "Seed symbol fingerprint missing. Reindex to compute similarity.");
+        }
+
+        if (!string.Equals(parsedQuery.RepositoryName, seedSymbol.RepositoryName, StringComparison.Ordinal))
+        {
+            return SimilaritySearchOutcome.Error("seed_scope_mismatch", "Seed symbol does not belong to requested repository.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(parsedQuery.BranchName) &&
+            !string.Equals(parsedQuery.BranchName, seedSymbol.BranchName, StringComparison.Ordinal))
+        {
+            return SimilaritySearchOutcome.Error("seed_scope_mismatch", "Seed symbol does not belong to requested branch.");
+        }
+
+        var branchName = parsedQuery.BranchName ?? seedSymbol.BranchName;
+        if (string.IsNullOrWhiteSpace(branchName))
+        {
+            return SimilaritySearchOutcome.Error("seed_scope_missing", "Seed symbol branch is unavailable for similarity search.");
+        }
+
+        var candidates = await _fingerprintRepository.FindCandidatesAsync(
+            seedSymbol.RepositoryName,
+            branchName,
+            seedSymbol.Language,
+            seedSymbol.Kind,
+            fingerprint.FingerprintKind,
+            fingerprint.Band0,
+            fingerprint.Band1,
+            fingerprint.Band2,
+            fingerprint.Band3,
+            SimilarityCandidateLimit,
+            cancellationToken);
+
+        var candidateList = candidates
+            .Where(candidate => candidate.SymbolId != seedSymbol.Id)
+            .GroupBy(candidate => candidate.SymbolId)
+            .Select(group =>
+            {
+                var entry = group.First();
+                var distance = BitOperations.PopCount(fingerprint.Fingerprint ^ entry.Fingerprint);
+                return new SimilarityCandidate(entry.SymbolId, entry.Fingerprint, distance);
+            })
+            .OrderBy(candidate => candidate.Distance)
+            .ToList();
+
+        if (candidateList.Count == 0)
+        {
+            return new SimilaritySearchOutcome(new List<SearchResult>(), null);
+        }
+
+        var candidateIds = candidateList.Select(candidate => candidate.SymbolId).ToList();
+        var symbols = await _symbolRepository.GetByIdsAsync(candidateIds, cancellationToken);
+        var symbolLookup = symbols.ToDictionary(symbol => symbol.Id, symbol => symbol);
+        var snippets = await _symbolSearchRepository.GetSnippetsBySymbolIdsAsync(candidateIds, cancellationToken);
+
+        var results = new List<SearchResult>();
+        var maxResults = Math.Min(parsedQuery.MaxResults, SimilarityTopK);
+        var terms = parsedQuery.SimilarTerms ?? new List<string>();
+
+        foreach (var candidate in candidateList)
+        {
+            if (results.Count >= maxResults)
+            {
+                break;
+            }
+
+            if (!symbolLookup.TryGetValue(candidate.SymbolId, out var symbol))
+            {
+                continue;
+            }
+
+            if (symbol.Language != seedSymbol.Language || symbol.Kind != seedSymbol.Kind)
+            {
+                continue;
+            }
+
+            snippets.TryGetValue(symbol.Id, out var snippet);
+            if (!MatchesExtraTerms(symbol, snippet, terms))
+            {
+                continue;
+            }
+
+            var score = 1.0f - (candidate.Distance / 64f);
+            results.Add(new SearchResult
+            {
+                Id = symbol.Id,
+                Type = "symbol",
+                Repository = symbol.RepositoryName,
+                Branch = symbol.BranchName,
+                FilePath = symbol.FilePath,
+                Language = symbol.Language,
+                SymbolName = symbol.Name,
+                QualifiedName = symbol.QualifiedName,
+                SymbolKind = symbol.Kind,
+                Content = snippet ?? symbol.Signature ?? $"{symbol.Kind} {symbol.Name}",
+                StartLine = symbol.StartLine,
+                EndLine = symbol.EndLine,
+                Score = score,
+                Signature = symbol.Signature,
+                Documentation = symbol.Documentation,
+                Reasons = new List<string>
+                {
+                    "similarity:simhash",
+                    $"distance:{candidate.Distance}",
+                    $"seed:{seedSymbol.Id}"
+                }
+            });
+        }
+
+        return new SimilaritySearchOutcome(results, null);
+    }
+
+    private static bool TryParseSimilarQuery(string query, out string seedSymbolId, out List<string> extraTerms)
+    {
+        seedSymbolId = string.Empty;
+        extraTerms = new List<string>();
+
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return false;
+        }
+
+        var trimmed = query.Trim();
+        if (!trimmed.StartsWith("similar:", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var remainder = trimmed["similar:".Length..].Trim();
+        if (string.IsNullOrWhiteSpace(remainder))
+        {
+            return false;
+        }
+
+        var parts = remainder.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0)
+        {
+            return false;
+        }
+
+        seedSymbolId = parts[0];
+        if (parts.Length > 1)
+        {
+            extraTerms = parts.Skip(1).ToList();
+        }
+
+        return true;
+    }
+
+    private static bool MatchesExtraTerms(Symbol symbol, string? snippet, IReadOnlyList<string> terms)
+    {
+        if (terms.Count == 0)
+        {
+            return true;
+        }
+
+        var haystack = string.Join(' ', new[]
+        {
+            symbol.Name,
+            symbol.QualifiedName,
+            symbol.Signature,
+            symbol.Documentation,
+            snippet
+        }.Where(text => !string.IsNullOrWhiteSpace(text)));
+
+        foreach (var term in terms)
+        {
+            if (string.IsNullOrWhiteSpace(term))
+            {
+                continue;
+            }
+
+            if (haystack.IndexOf(term, StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private sealed record SimilaritySearchOutcome(List<SearchResult> Results, Dictionary<string, object>? Metadata)
+    {
+        public static SimilaritySearchOutcome Error(string errorCode, string errorMessage)
+            => new(new List<SearchResult>(), new Dictionary<string, object>
+            {
+                ["errorCode"] = errorCode,
+                ["error"] = errorMessage
+            });
+    }
+
+    private sealed record SimilarityCandidate(string SymbolId, ulong Fingerprint, int Distance);
 
     /// <summary>
     /// Extract keywords from the query.
@@ -431,6 +685,7 @@ public sealed class QueryOrchestrator
                         FilePath = symbol.FilePath,
                         Language = symbol.Language,
                         SymbolName = symbol.Name,
+                        QualifiedName = symbol.QualifiedName,
                         SymbolKind = symbol.Kind,
                         Content = symbol.Signature ?? $"{symbol.Kind} {symbol.Name}",
                         StartLine = symbol.StartLine,
@@ -470,6 +725,7 @@ public sealed class QueryOrchestrator
                     FilePath = symbol.FilePath,
                     Language = symbol.Language,
                     SymbolName = symbol.Name,
+                    QualifiedName = symbol.QualifiedName,
                     SymbolKind = symbol.Kind,
                     Content = symbol.Signature ?? $"{symbol.Kind} {symbol.Name}",
                     StartLine = symbol.StartLine,
@@ -570,6 +826,7 @@ public sealed class QueryOrchestrator
                             FilePath = symbol.FilePath,
                             Language = symbol.Language,
                             SymbolName = symbol.Name,
+                            QualifiedName = symbol.QualifiedName,
                             SymbolKind = symbol.Kind,
                             Content = symbol.Signature ?? $"{symbol.Kind} {symbol.Name}",
                             StartLine = symbol.StartLine,
@@ -595,6 +852,7 @@ public sealed class QueryOrchestrator
                                     FilePath = sourceSymbol.FilePath,
                                     Language = sourceSymbol.Language,
                                     SymbolName = sourceSymbol.Name,
+                                    QualifiedName = sourceSymbol.QualifiedName,
                                     SymbolKind = sourceSymbol.Kind,
                                     Content = sourceSymbol.Signature ?? $"{sourceSymbol.Kind} {sourceSymbol.Name}",
                                     StartLine = sourceSymbol.StartLine,
@@ -630,6 +888,7 @@ public sealed class QueryOrchestrator
                             FilePath = symbol.FilePath,
                             Language = symbol.Language,
                             SymbolName = symbol.Name,
+                            QualifiedName = symbol.QualifiedName,
                             SymbolKind = symbol.Kind,
                             Content = symbol.Signature ?? $"{symbol.Kind} {symbol.Name}",
                             StartLine = symbol.StartLine,
@@ -699,6 +958,7 @@ public sealed class QueryOrchestrator
                     FilePath = cr.FilePath,
                     Language = cr.Language,
                     SymbolName = cr.SymbolName,
+                    QualifiedName = cr.QualifiedName,
                     SymbolKind = cr.SymbolKind,
                     Content = cr.Content,
                     StartLine = cr.StartLine,
@@ -797,6 +1057,7 @@ public sealed class QueryOrchestrator
                 FilePath = symbol.FilePath,
                 Language = symbol.Language,
                 SymbolName = symbol.Name,
+                QualifiedName = symbol.QualifiedName,
                 SymbolKind = symbol.Kind,
                 Content = snippet ?? symbol.Signature ?? $"{symbol.Kind} {symbol.Name}",
                 StartLine = symbol.StartLine,
@@ -1024,6 +1285,7 @@ public sealed class QueryOrchestrator
                 FilePath = result.FilePath,
                 Language = result.Language,
                 SymbolName = result.SymbolName,
+                QualifiedName = result.QualifiedName,
                 SymbolKind = result.SymbolKind,
                 Content = result.Content,
                 StartLine = result.StartLine,

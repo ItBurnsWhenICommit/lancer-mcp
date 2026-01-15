@@ -48,6 +48,7 @@ public class QueryOrchestratorEndToEndTests : FixtureTestBase
         _edgeRepository = new EdgeRepository(databaseService, NullLogger<EdgeRepository>.Instance);
         _chunkRepository = new CodeChunkRepository(databaseService, NullLogger<CodeChunkRepository>.Instance);
         _embeddingRepository = new EmbeddingRepository(databaseService, NullLogger<EmbeddingRepository>.Instance);
+        var fingerprintRepository = new SymbolFingerprintRepository(databaseService, NullLogger<SymbolFingerprintRepository>.Instance);
 
         var httpClient = new HttpClient();
         if (!string.IsNullOrEmpty(serverOptions.EmbeddingServiceUrl))
@@ -68,6 +69,7 @@ public class QueryOrchestratorEndToEndTests : FixtureTestBase
             _symbolRepository,
             symbolSearchRepository,
             _edgeRepository,
+            fingerprintRepository,
             embeddingService,
             optionsMonitor
         );

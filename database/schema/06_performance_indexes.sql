@@ -37,3 +37,21 @@ CREATE INDEX IF NOT EXISTS idx_symbol_search_kind
 
 CREATE INDEX IF NOT EXISTS idx_symbol_search_vector
     ON symbol_search USING GIN (search_vector);
+
+-- ============================================================================
+-- Symbol Fingerprint Indexes
+-- ============================================================================
+CREATE INDEX IF NOT EXISTS idx_symbol_fingerprints_repo_branch
+    ON symbol_fingerprints(repo_id, branch_name);
+
+CREATE INDEX IF NOT EXISTS idx_symbol_fingerprints_band0
+    ON symbol_fingerprints(repo_id, branch_name, language, kind, fingerprint_kind, band0);
+
+CREATE INDEX IF NOT EXISTS idx_symbol_fingerprints_band1
+    ON symbol_fingerprints(repo_id, branch_name, language, kind, fingerprint_kind, band1);
+
+CREATE INDEX IF NOT EXISTS idx_symbol_fingerprints_band2
+    ON symbol_fingerprints(repo_id, branch_name, language, kind, fingerprint_kind, band2);
+
+CREATE INDEX IF NOT EXISTS idx_symbol_fingerprints_band3
+    ON symbol_fingerprints(repo_id, branch_name, language, kind, fingerprint_kind, band3);

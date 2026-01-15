@@ -23,6 +23,7 @@ public sealed class QueryProfileSelectionTests
             new ReturningSymbolRepository(),
             new ThrowingSymbolSearchRepository(),
             new ThrowingEdgeRepository(),
+            new ThrowingSymbolFingerprintRepository(),
             new EmbeddingService(new HttpClient(), optionsMonitor, NullLogger<EmbeddingService>.Instance),
             optionsMonitor);
 
@@ -111,6 +112,11 @@ public sealed class QueryProfileSelectionTests
 
         public Task<int> CreateBatchAsync(IEnumerable<SymbolSearchEntry> entries, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
+
+        public Task<IReadOnlyDictionary<string, string?>> GetSnippetsBySymbolIdsAsync(
+            IEnumerable<string> symbolIds,
+            CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
     }
 
     private sealed class ThrowingEdgeRepository : IEdgeRepository
@@ -124,5 +130,28 @@ public sealed class QueryProfileSelectionTests
         public Task<bool> DeleteAsync(string id, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<int> DeleteByRepoIdAsync(string repoId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<int> DeleteByBranchAsync(string repoId, string branchName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    }
+
+    private sealed class ThrowingSymbolFingerprintRepository : ISymbolFingerprintRepository
+    {
+        public Task<SymbolFingerprintEntry?> GetBySymbolIdAsync(string symbolId, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
+        public Task<IEnumerable<(string SymbolId, ulong Fingerprint)>> FindCandidatesAsync(
+            string repoId,
+            string branchName,
+            Language language,
+            SymbolKind kind,
+            string fingerprintKind,
+            int band0,
+            int band1,
+            int band2,
+            int band3,
+            int limit,
+            CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
+        public Task<int> CreateBatchAsync(IEnumerable<SymbolFingerprintEntry> entries, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
     }
 }

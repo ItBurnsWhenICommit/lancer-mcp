@@ -65,4 +65,72 @@ public sealed class QueryResponseCompactionTests
 
         Assert.True(snippetTotal <= 8000, $"Snippet chars too large: {snippetTotal}");
     }
+
+    [Fact]
+    public void ToOptimizedFormat_IncludesErrorMetadata()
+    {
+        var response = new QueryResponse
+        {
+            Query = "similar:missing-id",
+            Intent = QueryIntent.Similar,
+            Results = new List<SearchResult>(),
+            TotalResults = 0,
+            ExecutionTimeMs = 1,
+            Metadata = new Dictionary<string, object>
+            {
+                ["repository"] = "repo",
+                ["branch"] = "main",
+                ["errorCode"] = "seed_not_found",
+                ["error"] = "Seed symbol not found."
+            }
+        };
+
+        var payload = response.ToOptimizedFormat();
+        var json = JsonSerializer.Serialize(payload);
+        using var doc = JsonDocument.Parse(json);
+
+        Assert.Equal("seed_not_found", doc.RootElement.GetProperty("errorCode").GetString());
+        Assert.Equal("Seed symbol not found.", doc.RootElement.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public void ToOptimizedFormat_IncludesQualifiedName()
+    {
+        var result = new SearchResult
+        {
+            Id = "1",
+            Type = "symbol",
+            Repository = "repo",
+            Branch = "main",
+            FilePath = "src/File.cs",
+            Language = Language.CSharp,
+            SymbolName = "File",
+            QualifiedName = "Repo.File",
+            Content = "public class File {}",
+            StartLine = 1,
+            EndLine = 2,
+            Score = 1.0f
+        };
+
+        var response = new QueryResponse
+        {
+            Query = "qualified query",
+            Intent = QueryIntent.Search,
+            Results = new List<SearchResult> { result },
+            TotalResults = 1,
+            ExecutionTimeMs = 1,
+            Metadata = new Dictionary<string, object>
+            {
+                ["repository"] = "repo",
+                ["branch"] = "main"
+            }
+        };
+
+        var payload = response.ToOptimizedFormat();
+        var json = JsonSerializer.Serialize(payload);
+        using var doc = JsonDocument.Parse(json);
+
+        var firstResult = doc.RootElement.GetProperty("results")[0];
+        Assert.Equal("Repo.File", firstResult.GetProperty("qualified").GetString());
+    }
 }

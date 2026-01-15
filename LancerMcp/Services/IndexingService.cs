@@ -19,6 +19,7 @@ public sealed class IndexingService
     private readonly BasicParserService _basicParser;
     private readonly ChunkingService _chunkingService;
     private readonly EmbeddingService _embeddingService;
+    private readonly IFingerprintService _fingerprintService;
     private readonly WorkspaceLoader _workspaceLoader;
     private readonly PersistenceService _persistenceService;
     private readonly EdgeResolutionService _edgeResolutionService;
@@ -43,6 +44,7 @@ public sealed class IndexingService
         BasicParserService basicParser,
         ChunkingService chunkingService,
         EmbeddingService embeddingService,
+        IFingerprintService fingerprintService,
         WorkspaceLoader workspaceLoader,
         PersistenceService persistenceService,
         EdgeResolutionService edgeResolutionService)
@@ -56,6 +58,7 @@ public sealed class IndexingService
         _basicParser = basicParser;
         _chunkingService = chunkingService;
         _embeddingService = embeddingService;
+        _fingerprintService = fingerprintService;
         _workspaceLoader = workspaceLoader;
         _persistenceService = persistenceService;
         _edgeResolutionService = edgeResolutionService;
@@ -337,6 +340,10 @@ public sealed class IndexingService
         var symbolSearchEntries = parsedFiles.SelectMany(SymbolSearchBuilder.BuildEntries).ToList();
         _logger.LogInformation("Generated {Count} symbol search entries", symbolSearchEntries.Count);
 
+        // Step 1c: Build symbol fingerprint entries (CPU-light, do BEFORE transaction)
+        var fingerprintEntries = parsedFiles.SelectMany(file => SymbolFingerprintBuilder.BuildEntries(file, _fingerprintService)).ToList();
+        _logger.LogInformation("Generated {Count} symbol fingerprint entries", fingerprintEntries.Count);
+
         // Step 2: Generate embeddings (HTTP calls, do BEFORE transaction)
         List<Embedding> embeddings = new();
         if (allChunks.Any())
@@ -430,6 +437,13 @@ public sealed class IndexingService
             {
                 await _persistenceService.CreateSymbolSearchBatchAsync(connection, transaction, symbolSearchEntries, cancellationToken);
                 _logger.LogInformation("Persisted {Count} symbol search entries", symbolSearchEntries.Count);
+            }
+
+            // Step 3d.2: Persist symbol fingerprint entries
+            if (fingerprintEntries.Any())
+            {
+                await _persistenceService.CreateSymbolFingerprintBatchAsync(connection, transaction, fingerprintEntries, cancellationToken);
+                _logger.LogInformation("Persisted {Count} symbol fingerprint entries", fingerprintEntries.Count);
             }
 
             // Step 3e: Resolve cross-file edges

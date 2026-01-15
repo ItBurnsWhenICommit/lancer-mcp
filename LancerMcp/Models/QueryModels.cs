@@ -41,7 +41,12 @@ public enum QueryIntent
     /// <summary>
     /// Find examples or usage patterns
     /// </summary>
-    Examples
+    Examples,
+
+    /// <summary>
+    /// Find symbols similar to a seed symbol
+    /// </summary>
+    Similar
 }
 
 /// <summary>
@@ -78,6 +83,16 @@ public sealed class ParsedQuery
     /// Specific file paths mentioned in the query
     /// </summary>
     public List<string>? FilePaths { get; init; }
+
+    /// <summary>
+    /// Similarity seed symbol id when using similar:&lt;symbol-id&gt; queries.
+    /// </summary>
+    public string? SimilarSymbolId { get; init; }
+
+    /// <summary>
+    /// Extra terms to post-filter similarity results.
+    /// </summary>
+    public List<string>? SimilarTerms { get; init; }
 
     /// <summary>
     /// Language filter if specified
@@ -144,6 +159,11 @@ public sealed class SearchResult
     /// Symbol name (if applicable)
     /// </summary>
     public string? SymbolName { get; init; }
+
+    /// <summary>
+    /// Qualified symbol name (if applicable)
+    /// </summary>
+    public string? QualifiedName { get; init; }
 
     /// <summary>
     /// Symbol kind (if applicable)
@@ -351,6 +371,11 @@ public sealed class QueryResponse
             }
         }
 
+        if (!string.IsNullOrEmpty(result.QualifiedName))
+        {
+            minimalResult["qualified"] = result.QualifiedName;
+        }
+
         if (!string.IsNullOrEmpty(result.Signature))
         {
             minimalResult["sig"] = result.Signature;
@@ -420,17 +445,29 @@ public sealed class QueryResponse
 
     private object BuildPayload(string repository, string branch, IReadOnlyList<Dictionary<string, object?>> results)
     {
-        return new
+        var payload = new Dictionary<string, object?>
         {
-            repo = repository,
-            branch = branch,
-            query = Query,
-            intent = Intent.ToString(),
-            total = TotalResults,
-            results = results.ToArray(),
-            time = ExecutionTimeMs,
-            suggestions = SuggestedQueries
+            ["repo"] = repository,
+            ["branch"] = branch,
+            ["query"] = Query,
+            ["intent"] = Intent.ToString(),
+            ["total"] = TotalResults,
+            ["results"] = results.ToArray(),
+            ["time"] = ExecutionTimeMs,
+            ["suggestions"] = SuggestedQueries
         };
+
+        if (Metadata?.TryGetValue("errorCode", out var errorCode) == true)
+        {
+            payload["errorCode"] = errorCode;
+        }
+
+        if (Metadata?.TryGetValue("error", out var errorMessage) == true)
+        {
+            payload["error"] = errorMessage;
+        }
+
+        return payload;
     }
 
     private object EnsureJsonSize(

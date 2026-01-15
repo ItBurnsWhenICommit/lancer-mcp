@@ -112,10 +112,31 @@ public sealed class SymbolSearchRepository : ISymbolSearchRepository
         return rowsAffected;
     }
 
+    public async Task<IReadOnlyDictionary<string, string?>> GetSnippetsBySymbolIdsAsync(
+        IEnumerable<string> symbolIds,
+        CancellationToken cancellationToken = default)
+    {
+        var ids = symbolIds.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct().ToArray();
+        if (ids.Length == 0)
+        {
+            return new Dictionary<string, string?>();
+        }
+
+        const string sql = @"
+            SELECT symbol_id AS SymbolId,
+                   snippet AS Snippet
+            FROM symbol_search
+            WHERE symbol_id = ANY(@SymbolIds)";
+
+        var rows = await _db.QueryAsync<SnippetRow>(sql, new { SymbolIds = ids }, cancellationToken);
+        return rows.ToDictionary(row => row.SymbolId, row => row.Snippet);
+    }
+
     private static string JoinTokens(IReadOnlyList<string> tokens)
     {
         return tokens.Count == 0 ? string.Empty : string.Join(' ', tokens);
     }
 
     private sealed record SearchRow(string SymbolId, string? Snippet, float Score);
+    private sealed record SnippetRow(string SymbolId, string? Snippet);
 }

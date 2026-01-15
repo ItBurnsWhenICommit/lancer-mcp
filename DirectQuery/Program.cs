@@ -101,6 +101,11 @@ class Program
                 loggerFactory.CreateLogger<EmbeddingRepository>()
             );
 
+            var fingerprintRepository = new SymbolFingerprintRepository(
+                databaseService,
+                loggerFactory.CreateLogger<SymbolFingerprintRepository>()
+            );
+
             // Create HTTP client for embedding service
             var httpClient = new HttpClient
             {
@@ -122,6 +127,7 @@ class Program
                 symbolRepository,
                 symbolSearchRepository,
                 edgeRepository,
+                fingerprintRepository,
                 embeddingService,
                 optionsMonitor
             );

@@ -22,6 +22,7 @@ Note: PostgreSQL must be running before executing the benchmark.
 - DB size (bytes)
 - Query p50/p95 (ms)
 - Top-k hit rate
+- Similarity top-k hit rate for `similar:<symbol-id>` queries (Phase 3)
 
 ## Database Configuration
 
