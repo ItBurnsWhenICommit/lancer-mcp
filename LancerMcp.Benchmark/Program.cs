@@ -96,6 +96,9 @@ var embeddingRepository = new EmbeddingRepository(
     databaseService,
     loggerFactory.CreateLogger<EmbeddingRepository>());
 
+var embeddingJobRepository = new EmbeddingJobRepository(databaseService);
+var embeddingJobEnqueuer = new EmbeddingJobEnqueuer(optionsMonitor, embeddingJobRepository);
+
 var fingerprintRepository = new SymbolFingerprintRepository(
     databaseService,
     loggerFactory.CreateLogger<SymbolFingerprintRepository>());
@@ -131,6 +134,7 @@ var indexingService = new IndexingService(
     new BasicParserService(loggerFactory.CreateLogger<BasicParserService>()),
     new ChunkingService(gitTracker, loggerFactory.CreateLogger<ChunkingService>(), optionsMonitor),
     embeddingService,
+    embeddingJobEnqueuer,
     fingerprintService,
     workspaceLoader,
     new PersistenceService(loggerFactory.CreateLogger<PersistenceService>(), fileRepository, symbolRepository, chunkRepository),

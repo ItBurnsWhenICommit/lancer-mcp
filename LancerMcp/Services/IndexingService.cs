@@ -19,6 +19,7 @@ public sealed class IndexingService
     private readonly BasicParserService _basicParser;
     private readonly ChunkingService _chunkingService;
     private readonly EmbeddingService _embeddingService;
+    private readonly EmbeddingJobEnqueuer _embeddingJobEnqueuer;
     private readonly IFingerprintService _fingerprintService;
     private readonly WorkspaceLoader _workspaceLoader;
     private readonly PersistenceService _persistenceService;
@@ -44,6 +45,7 @@ public sealed class IndexingService
         BasicParserService basicParser,
         ChunkingService chunkingService,
         EmbeddingService embeddingService,
+        EmbeddingJobEnqueuer embeddingJobEnqueuer,
         IFingerprintService fingerprintService,
         WorkspaceLoader workspaceLoader,
         PersistenceService persistenceService,
@@ -58,6 +60,7 @@ public sealed class IndexingService
         _basicParser = basicParser;
         _chunkingService = chunkingService;
         _embeddingService = embeddingService;
+        _embeddingJobEnqueuer = embeddingJobEnqueuer;
         _fingerprintService = fingerprintService;
         _workspaceLoader = workspaceLoader;
         _persistenceService = persistenceService;
@@ -344,15 +347,6 @@ public sealed class IndexingService
         var fingerprintEntries = parsedFiles.SelectMany(file => SymbolFingerprintBuilder.BuildEntries(file, _fingerprintService)).ToList();
         _logger.LogInformation("Generated {Count} symbol fingerprint entries", fingerprintEntries.Count);
 
-        // Step 2: Generate embeddings (HTTP calls, do BEFORE transaction)
-        List<Embedding> embeddings = new();
-        if (allChunks.Any())
-        {
-            _logger.LogInformation("Generating embeddings for {Count} chunks...", allChunks.Count);
-            embeddings = await _embeddingService.GenerateEmbeddingsAsync(allChunks, cancellationToken);
-            _logger.LogInformation("Generated {Count} embeddings", embeddings.Count);
-        }
-
         // Step 3: Open transaction and persist all data atomically
         await using var connection = await _db.GetConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
@@ -465,13 +459,6 @@ public sealed class IndexingService
                 _logger.LogInformation("Persisted {Count} chunks", allChunks.Count);
             }
 
-            // Step 3g: Persist embeddings
-            if (embeddings.Any())
-            {
-                await _persistenceService.CreateEmbeddingsBatchAsync(connection, transaction, embeddings, cancellationToken);
-                _logger.LogInformation("Persisted {Count} embeddings", embeddings.Count);
-            }
-
             // Commit the transaction
             await transaction.CommitAsync(cancellationToken);
             _logger.LogInformation("Storage persistence complete (transaction committed)");
@@ -482,6 +469,20 @@ public sealed class IndexingService
             _logger.LogError(ex, "Failed to persist data to storage, rolling back transaction");
             await transaction.RollbackAsync(cancellationToken);
             throw;
+        }
+
+        if (allChunks.Any())
+        {
+            foreach (var chunkGroup in allChunks.GroupBy(chunk => new { chunk.RepositoryName, chunk.BranchName, chunk.CommitSha }))
+            {
+                var chunkIds = chunkGroup.Select(chunk => chunk.Id).ToList();
+                await _embeddingJobEnqueuer.EnqueueAsync(
+                    chunkGroup.Key.RepositoryName,
+                    chunkGroup.Key.BranchName,
+                    chunkGroup.Key.CommitSha,
+                    chunkIds,
+                    cancellationToken);
+            }
         }
     }
 
