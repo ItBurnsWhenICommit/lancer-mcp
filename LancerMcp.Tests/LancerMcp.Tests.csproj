@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\LancerMcp\LancerMcp.csproj" />
+    <ProjectReference Include="..\LancerMcp.Benchmark\LancerMcp.Benchmark.csproj" />
   </ItemGroup>
 
 </Project>

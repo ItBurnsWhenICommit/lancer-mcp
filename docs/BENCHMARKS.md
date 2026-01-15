@@ -12,6 +12,7 @@ Note: PostgreSQL must be running before executing the benchmark.
 
 - Default dataset: `testdata/csharp`
 - Source repository is created in a temp directory per run
+- Benchmark copy excludes `bin/`, `obj/`, `.git/`, `*.user`, and `*.suo` for determinism
 - Embeddings are disabled (Fast profile baseline)
 
 ## Metrics
