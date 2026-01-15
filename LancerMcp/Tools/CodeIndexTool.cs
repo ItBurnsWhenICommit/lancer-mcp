@@ -52,6 +52,12 @@ public sealed class CodeIndexTool
         int? maxResults = null,
         [Description("Optional: retrieval profile (Fast, Hybrid, Semantic). Defaults to Fast.")]
         string? profile = null,
+        [Description("Optional: base64-encoded float32[] query embedding (little-endian).")]
+        string? queryEmbeddingBase64 = null,
+        [Description("Optional: query embedding dimensions (must match decoded length).")]
+        int? queryEmbeddingDims = null,
+        [Description("Optional: query embedding model identifier.")]
+        string? queryEmbeddingModel = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -150,6 +156,9 @@ public sealed class CodeIndexTool
                 language: null,
                 maxResults: maxResults ?? 50,
                 profileOverride: profileOverride,
+                queryEmbeddingBase64: queryEmbeddingBase64,
+                queryEmbeddingDims: queryEmbeddingDims,
+                queryEmbeddingModel: queryEmbeddingModel,
                 cancellationToken: cancellationToken);
 
             var responseOptions = _options.CurrentValue;
