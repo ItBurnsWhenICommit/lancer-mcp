@@ -75,7 +75,12 @@ public sealed class BenchmarkBackend : IBenchmarkBackend
         foreach (var spec in querySet.Queries)
         {
             var stopwatch = Stopwatch.StartNew();
-            var json = await _codeIndexTool.Query(_repositoryName, spec.Query, _branchName, maxResults: querySet.TopK, cancellationToken);
+            var json = await _codeIndexTool.Query(
+                _repositoryName,
+                spec.Query,
+                _branchName,
+                maxResults: querySet.TopK,
+                cancellationToken: cancellationToken);
             stopwatch.Stop();
 
             var parsed = BenchmarkResponseParser.Parse(json, spec.Query, stopwatch.ElapsedMilliseconds);
