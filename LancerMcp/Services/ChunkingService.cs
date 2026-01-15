@@ -97,7 +97,7 @@ public sealed class ChunkingService
                 CommitSha = parsedFile.CommitSha,
                 FilePath = parsedFile.FilePath,
                 Language = parsedFile.Language,
-                Chunks = chunks,
+                Chunks = DeduplicateChunks(chunks),
                 Success = true
             };
 
@@ -124,6 +124,36 @@ public sealed class ChunkingService
             };
         }
     }
+
+    private static List<CodeChunk> DeduplicateChunks(IEnumerable<CodeChunk> chunks)
+    {
+        var unique = new List<CodeChunk>();
+        var seen = new HashSet<ChunkKey>();
+
+        foreach (var chunk in chunks)
+        {
+            var key = new ChunkKey(
+                chunk.RepositoryName,
+                chunk.BranchName,
+                chunk.FilePath,
+                chunk.ChunkStartLine,
+                chunk.ChunkEndLine);
+
+            if (seen.Add(key))
+            {
+                unique.Add(chunk);
+            }
+        }
+
+        return unique;
+    }
+
+    private readonly record struct ChunkKey(
+        string RepositoryName,
+        string BranchName,
+        string FilePath,
+        int ChunkStartLine,
+        int ChunkEndLine);
 
     /// <summary>
     /// Determines if a symbol should be chunked.
@@ -227,4 +257,3 @@ public sealed class ChunkingService
         };
     }
 }
-
