@@ -25,3 +25,12 @@
 - added symbol_search entries with snippets for sparse symbol retrieval
 - added symbol_search schema + indexes and persistence wiring
 - implemented Fast profile symbol retrieval with compact "why" signals
+
+## [phase 3] similarity without embeddings
+
+- added SimHash fingerprint service and symbol fingerprint builder
+- added symbol_fingerprints schema + repository and persistence wiring
+- implemented `similar:<symbol-id>` routing with error metadata for missing seeds/fingerprints
+- added banded candidate lookup, Hamming distance ranking, and post-filter terms
+- added snippet lookup by symbol id for compact similarity results
+- include error metadata in compact response payloads

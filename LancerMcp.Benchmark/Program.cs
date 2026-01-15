@@ -8,6 +8,7 @@ using LancerMcp.Tools;
 using Microsoft.Build.Locator;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Diagnostics;
 
 if (!MSBuildLocator.IsRegistered)
 {
@@ -51,6 +52,8 @@ var serverOptions = new ServerOptions
     DatabasePassword = Environment.GetEnvironmentVariable("DB_PASSWORD") ?? "postgres"
 };
 
+await EnsureBenchmarkMigrationsAsync(repoRoot, serverOptions);
+
 var optionsMonitor = new SimpleOptionsMonitor(serverOptions);
 
 using var loggerFactory = LoggerFactory.Create(builder => builder.SetMinimumLevel(Microsoft.Extensions.Logging.LogLevel.Warning));
@@ -93,6 +96,10 @@ var embeddingRepository = new EmbeddingRepository(
     databaseService,
     loggerFactory.CreateLogger<EmbeddingRepository>());
 
+var fingerprintRepository = new SymbolFingerprintRepository(
+    databaseService,
+    loggerFactory.CreateLogger<SymbolFingerprintRepository>());
+
 var workspaceLoader = new WorkspaceLoader(loggerFactory.CreateLogger<WorkspaceLoader>());
 
 var gitTracker = new GitTrackerService(
@@ -112,6 +119,8 @@ var embeddingService = new EmbeddingService(
     optionsMonitor,
     loggerFactory.CreateLogger<EmbeddingService>());
 
+var fingerprintService = new SimHashService();
+
 var indexingService = new IndexingService(
     loggerFactory.CreateLogger<IndexingService>(),
     optionsMonitor,
@@ -122,6 +131,7 @@ var indexingService = new IndexingService(
     new BasicParserService(loggerFactory.CreateLogger<BasicParserService>()),
     new ChunkingService(gitTracker, loggerFactory.CreateLogger<ChunkingService>(), optionsMonitor),
     embeddingService,
+    fingerprintService,
     workspaceLoader,
     new PersistenceService(loggerFactory.CreateLogger<PersistenceService>(), fileRepository, symbolRepository, chunkRepository),
     new EdgeResolutionService(loggerFactory.CreateLogger<EdgeResolutionService>()));
@@ -133,6 +143,7 @@ var queryOrchestrator = new QueryOrchestrator(
     symbolRepository,
     symbolSearchRepository,
     edgeRepository,
+    fingerprintRepository,
     embeddingService,
     optionsMonitor);
 
@@ -161,6 +172,59 @@ Console.WriteLine($"Peak memory (bytes): {report.Indexing.PeakWorkingSetBytes}")
 Console.WriteLine($"DB size (bytes): {report.Indexing.DatabaseSizeBytes}");
 Console.WriteLine($"Query p50/p95 (ms): {report.QueryLatencyP50Ms}/{report.QueryLatencyP95Ms}");
 Console.WriteLine($"Top-{report.TopK} hit rate: {report.TopKHitRate:P1}");
+
+static async Task EnsureBenchmarkMigrationsAsync(string repoRoot, ServerOptions options)
+{
+    var databaseDir = Path.Combine(repoRoot, "database");
+    var migrateScript = Path.Combine(databaseDir, "migrate.sh");
+
+    if (!File.Exists(migrateScript))
+    {
+        throw new FileNotFoundException($"Migration script not found: {migrateScript}");
+    }
+
+    Console.WriteLine($"Running migrations for benchmark DB '{options.DatabaseName}'...");
+
+    var startInfo = new ProcessStartInfo
+    {
+        FileName = "/bin/bash",
+        Arguments = "-c \"./migrate.sh\"",
+        WorkingDirectory = databaseDir,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        UseShellExecute = false,
+        CreateNoWindow = true
+    };
+
+    startInfo.Environment["DB_NAME"] = options.DatabaseName;
+    startInfo.Environment["DB_USER"] = options.DatabaseUser;
+
+    using var process = Process.Start(startInfo)
+        ?? throw new InvalidOperationException("Failed to start migrate.sh");
+
+    var outputTask = process.StandardOutput.ReadToEndAsync();
+    var errorTask = process.StandardError.ReadToEndAsync();
+
+    await process.WaitForExitAsync();
+
+    var output = await outputTask;
+    var error = await errorTask;
+
+    if (!string.IsNullOrWhiteSpace(output))
+    {
+        Console.WriteLine(output.TrimEnd());
+    }
+
+    if (!string.IsNullOrWhiteSpace(error))
+    {
+        Console.Error.WriteLine(error.TrimEnd());
+    }
+
+    if (process.ExitCode != 0)
+    {
+        throw new InvalidOperationException($"Migration failed with exit code {process.ExitCode}.");
+    }
+}
 
 static string PrepareSourceRepository(string testdataRoot, string branchName)
 {

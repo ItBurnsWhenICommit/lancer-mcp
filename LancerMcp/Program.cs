@@ -63,6 +63,7 @@ builder.Services.AddSingleton<ISymbolSearchRepository, SymbolSearchRepository>()
 builder.Services.AddSingleton<IEdgeRepository, EdgeRepository>();
 builder.Services.AddSingleton<ICodeChunkRepository, CodeChunkRepository>();
 builder.Services.AddSingleton<IEmbeddingRepository, EmbeddingRepository>();
+builder.Services.AddSingleton<ISymbolFingerprintRepository, SymbolFingerprintRepository>();
 
 // Application services
 builder.Services.AddSingleton<GitTrackerService>();
@@ -70,6 +71,7 @@ builder.Services.AddSingleton<LanguageDetectionService>();
 builder.Services.AddSingleton<RoslynParserService>();
 builder.Services.AddSingleton<BasicParserService>();
 builder.Services.AddSingleton<ChunkingService>();
+builder.Services.AddSingleton<IFingerprintService, SimHashService>();
 builder.Services.AddSingleton<QueryOrchestrator>();
 builder.Services.AddSingleton<WorkspaceLoader>();
 builder.Services.AddSingleton<PersistenceService>();

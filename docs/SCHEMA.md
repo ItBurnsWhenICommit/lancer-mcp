@@ -42,6 +42,13 @@
 - `snippet`
 - `search_vector` (weighted tsvector)
 
+### symbol_fingerprints
+- `symbol_id` (PK, references symbols)
+- `repo_id`, `branch_name`, `commit_sha`, `file_path`, `language`, `kind`
+- `fingerprint_kind` (e.g., simhash_v1)
+- `fingerprint` (uint64 stored as bigint)
+- `band0`..`band3` (16-bit bands for candidate lookup)
+
 ### edges
 - `source_symbol_id`, `target_symbol_id`, `kind`
 - `repo_id`, `branch_name`, `commit_sha`
@@ -63,5 +70,6 @@
 - Repos/branches/commits track Git state for incremental indexing
 - Files/symbols/edges provide symbol-level retrieval and graph signals
 - Symbol_search enables the Fast profile via weighted token search on symbols
+- Symbol_fingerprints supports similarity search without embeddings (banded SimHash)
 - Code chunks support sparse retrieval and optional embeddings
 - Embeddings are optional and isolated from baseline retrieval
