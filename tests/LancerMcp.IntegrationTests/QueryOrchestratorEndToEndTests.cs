@@ -84,7 +84,8 @@ public class QueryOrchestratorEndToEndTests : FixtureTestBase
         var response = await _queryOrchestrator.QueryAsync(
             query,
             repositoryName: "lancer-mcp",
-            maxResults: 10
+            maxResults: 10,
+            profileOverride: RetrievalProfile.Hybrid
         );
 
         // Assert
@@ -113,7 +114,8 @@ public class QueryOrchestratorEndToEndTests : FixtureTestBase
         var response = await _queryOrchestrator.QueryAsync(
             query,
             repositoryName: "lancer-mcp",
-            maxResults: 10
+            maxResults: 10,
+            profileOverride: RetrievalProfile.Hybrid
         );
 
         // Assert
@@ -146,7 +148,8 @@ public class QueryOrchestratorEndToEndTests : FixtureTestBase
         var response = await _queryOrchestrator.QueryAsync(
             query,
             repositoryName: "lancer-mcp",
-            maxResults: 20
+            maxResults: 20,
+            profileOverride: RetrievalProfile.Hybrid
         );
 
         // Assert
@@ -180,7 +183,8 @@ public class QueryOrchestratorEndToEndTests : FixtureTestBase
         var response = await _queryOrchestrator.QueryAsync(
             query,
             repositoryName: "lancer-mcp",
-            maxResults: 20
+            maxResults: 20,
+            profileOverride: RetrievalProfile.Hybrid
         );
 
         // Assert
@@ -239,7 +243,8 @@ public class QueryOrchestratorEndToEndTests : FixtureTestBase
         var response = await _queryOrchestrator.QueryAsync(
             query,
             repositoryName: "lancer-mcp",
-            maxResults: 20
+            maxResults: 20,
+            profileOverride: RetrievalProfile.Hybrid
         );
 
         // Assert
@@ -263,7 +268,8 @@ public class QueryOrchestratorEndToEndTests : FixtureTestBase
             query,
             repositoryName: "lancer-mcp",
             language: Language.CSharp,
-            maxResults: 20
+            maxResults: 20,
+            profileOverride: RetrievalProfile.Hybrid
         );
 
         // Assert
@@ -289,7 +295,12 @@ public class QueryOrchestratorEndToEndTests : FixtureTestBase
         var query = "test query";
 
         // Act
-        var response = await _queryOrchestrator.QueryAsync(query, repositoryName: "lancer-mcp", maxResults: 10);
+        var response = await _queryOrchestrator.QueryAsync(
+            query,
+            repositoryName: "lancer-mcp",
+            maxResults: 10,
+            profileOverride: RetrievalProfile.Hybrid
+        );
 
         // Assert
         response.Should().NotBeNull();
@@ -317,7 +328,8 @@ public class QueryOrchestratorEndToEndTests : FixtureTestBase
         var response = await _queryOrchestrator.QueryAsync(
             query,
             repositoryName: "lancer-mcp",
-            maxResults: 10
+            maxResults: 10,
+            profileOverride: RetrievalProfile.Hybrid
         );
 
         // Assert
@@ -357,7 +369,8 @@ public class QueryOrchestratorEndToEndTests : FixtureTestBase
         var response = await _queryOrchestrator.QueryAsync(
             query,
             repositoryName: "lancer-mcp",
-            maxResults: 20
+            maxResults: 20,
+            profileOverride: RetrievalProfile.Hybrid
         );
 
         // Assert
