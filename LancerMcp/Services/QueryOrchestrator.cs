@@ -22,7 +22,7 @@ public sealed class QueryOrchestrator
     private readonly ISymbolSearchRepository _symbolSearchRepository;
     private readonly IEdgeRepository _edgeRepository;
     private readonly ISymbolFingerprintRepository _fingerprintRepository;
-    private readonly EmbeddingService _embeddingService;
+    private readonly IEmbeddingProvider _embeddingProvider;
     private readonly IOptionsMonitor<ServerOptions> _options;
 
     // Intent detection patterns
@@ -99,7 +99,7 @@ public sealed class QueryOrchestrator
         ISymbolSearchRepository symbolSearchRepository,
         IEdgeRepository edgeRepository,
         ISymbolFingerprintRepository fingerprintRepository,
-        EmbeddingService embeddingService,
+        IEmbeddingProvider embeddingProvider,
         IOptionsMonitor<ServerOptions> options)
     {
         _logger = logger;
@@ -109,7 +109,7 @@ public sealed class QueryOrchestrator
         _symbolSearchRepository = symbolSearchRepository;
         _edgeRepository = edgeRepository;
         _fingerprintRepository = fingerprintRepository;
-        _embeddingService = embeddingService;
+        _embeddingProvider = embeddingProvider;
         _options = options;
     }
 
@@ -149,59 +149,70 @@ public sealed class QueryOrchestrator
                 queryEmbeddingModel,
                 maxDims: 4096);
 
+            var embeddingsEnabled = _options.CurrentValue.EmbeddingsEnabled;
+            var providerAvailable = _embeddingProvider.IsAvailable;
+
             string? resolvedEmbeddingModel = null;
             string? embeddingErrorCode = null;
             string? embeddingError = null;
 
-            if (embeddingParse.Success)
+            if (embeddingsEnabled && providerAvailable)
             {
-                if (!string.IsNullOrWhiteSpace(embeddingParse.Model))
+                if (!embeddingParse.Success)
                 {
-                    resolvedEmbeddingModel = embeddingParse.Model;
-                }
-                else if (!string.IsNullOrWhiteSpace(_options.CurrentValue.EmbeddingModel))
-                {
-                    resolvedEmbeddingModel = _options.CurrentValue.EmbeddingModel.Trim().ToLowerInvariant();
+                    embeddingErrorCode = embeddingParse.ErrorCode;
+                    embeddingError = embeddingParse.Error;
                 }
                 else
                 {
-                    var models = await _embeddingRepository.GetModelsAsync(repositoryName, branchName, cancellationToken);
-                    if (models.Count == 1)
+                    if (!string.IsNullOrWhiteSpace(embeddingParse.Model))
                     {
-                        resolvedEmbeddingModel = models[0];
+                        resolvedEmbeddingModel = embeddingParse.Model;
+                    }
+                    else if (!string.IsNullOrWhiteSpace(_options.CurrentValue.EmbeddingModel))
+                    {
+                        resolvedEmbeddingModel = _options.CurrentValue.EmbeddingModel.Trim().ToLowerInvariant();
                     }
                     else
                     {
-                        embeddingErrorCode = "embedding_model_ambiguous";
-                        embeddingError = "Multiple embedding models found; specify queryEmbeddingModel.";
+                        var models = await _embeddingRepository.GetModelsAsync(repositoryName, branchName, cancellationToken);
+                        if (models.Count == 1)
+                        {
+                            resolvedEmbeddingModel = models[0];
+                        }
+                        else
+                        {
+                            embeddingErrorCode = "embedding_model_ambiguous";
+                            embeddingError = "Multiple embedding models found; specify queryEmbeddingModel.";
+                        }
                     }
-                }
 
-                if (resolvedEmbeddingModel != null && embeddingErrorCode == null)
-                {
-                    var hasEmbeddings = await _embeddingRepository.HasAnyEmbeddingsAsync(
-                        repositoryName,
-                        branchName,
-                        resolvedEmbeddingModel,
-                        cancellationToken);
-
-                    if (!hasEmbeddings)
+                    if (resolvedEmbeddingModel != null && embeddingErrorCode == null)
                     {
-                        embeddingErrorCode = "embedding_model_not_found";
-                        embeddingError = $"No embeddings found for model '{resolvedEmbeddingModel}'.";
-                    }
-                    else
-                    {
-                        var modelDims = await _embeddingRepository.GetModelDimsAsync(
+                        var hasEmbeddings = await _embeddingRepository.HasAnyEmbeddingsAsync(
                             repositoryName,
                             branchName,
                             resolvedEmbeddingModel,
                             cancellationToken);
 
-                        if (modelDims.HasValue && embeddingParse.Vector != null && modelDims.Value != embeddingParse.Vector.Length)
+                        if (!hasEmbeddings)
                         {
-                            embeddingErrorCode = "embedding_dims_mismatch";
-                            embeddingError = "Query embedding dims do not match stored embeddings.";
+                            embeddingErrorCode = "embedding_model_not_found";
+                            embeddingError = $"No embeddings found for model '{resolvedEmbeddingModel}'.";
+                        }
+                        else
+                        {
+                            var modelDims = await _embeddingRepository.GetModelDimsAsync(
+                                repositoryName,
+                                branchName,
+                                resolvedEmbeddingModel,
+                                cancellationToken);
+
+                            if (modelDims.HasValue && embeddingParse.Vector != null && modelDims.Value != embeddingParse.Vector.Length)
+                            {
+                                embeddingErrorCode = "embedding_dims_mismatch";
+                                embeddingError = "Query embedding dims do not match stored embeddings.";
+                            }
                         }
                     }
                 }
@@ -242,24 +253,20 @@ public sealed class QueryOrchestrator
             };
 
             metadata["embeddingUsed"] = false;
-            metadata["fallback"] = parsedQuery.Profile switch
+
+            var fallbackReason = ResolveEmbeddingFallback(parsedQuery.Profile, embeddingsEnabled, providerAvailable, embeddingParse, embeddingErrorCode);
+            if (!string.IsNullOrWhiteSpace(fallbackReason))
             {
-                RetrievalProfile.Semantic => "semantic->hybrid->fast",
-                RetrievalProfile.Hybrid => "hybrid->fast",
-                _ => "fast"
-            };
+                metadata["fallback"] = fallbackReason;
+            }
 
             if (resolvedEmbeddingModel != null)
             {
                 metadata["embeddingModel"] = resolvedEmbeddingModel;
             }
 
-            if (!embeddingParse.Success && parsedQuery.Profile != RetrievalProfile.Fast)
-            {
-                metadata["errorCode"] = embeddingParse.ErrorCode!;
-                metadata["error"] = embeddingParse.Error!;
-            }
-            else if (embeddingErrorCode != null && parsedQuery.Profile != RetrievalProfile.Fast)
+            if (embeddingErrorCode != null &&
+                (fallbackReason == EmbeddingFallbackCodes.MissingQueryEmbedding || fallbackReason == EmbeddingFallbackCodes.QueryEmbeddingInvalid))
             {
                 metadata["errorCode"] = embeddingErrorCode;
                 metadata["error"] = embeddingError ?? string.Empty;
@@ -345,6 +352,43 @@ public sealed class QueryOrchestrator
             SimilarSymbolId = similarSymbolId,
             SimilarTerms = similarTerms
         };
+    }
+
+    private static string? ResolveEmbeddingFallback(
+        RetrievalProfile profile,
+        bool embeddingsEnabled,
+        bool providerAvailable,
+        QueryEmbeddingParseResult embeddingParse,
+        string? embeddingErrorCode)
+    {
+        if (profile == RetrievalProfile.Fast)
+        {
+            return null;
+        }
+
+        if (!embeddingsEnabled)
+        {
+            return EmbeddingFallbackCodes.EmbeddingsDisabled;
+        }
+
+        if (!providerAvailable)
+        {
+            return EmbeddingFallbackCodes.ProviderUnavailable;
+        }
+
+        if (!embeddingParse.Success)
+        {
+            return embeddingParse.ErrorCode == "missing_query_embedding"
+                ? EmbeddingFallbackCodes.MissingQueryEmbedding
+                : EmbeddingFallbackCodes.QueryEmbeddingInvalid;
+        }
+
+        if (embeddingErrorCode != null)
+        {
+            return EmbeddingFallbackCodes.QueryEmbeddingInvalid;
+        }
+
+        return null;
     }
 
     /// <summary>

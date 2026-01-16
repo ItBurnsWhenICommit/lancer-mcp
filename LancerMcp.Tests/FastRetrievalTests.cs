@@ -1,4 +1,3 @@
-using System.Net.Http;
 using LancerMcp.Configuration;
 using LancerMcp.Models;
 using LancerMcp.Repositories;
@@ -27,7 +26,7 @@ public sealed class FastRetrievalTests
             symbolSearchRepository,
             new ThrowingEdgeRepository(),
             new ThrowingSymbolFingerprintRepository(),
-            new EmbeddingService(new HttpClient(), optionsMonitor, NullLogger<EmbeddingService>.Instance),
+            new TestEmbeddingProvider(),
             optionsMonitor);
 
         var response = await orchestrator.QueryAsync(

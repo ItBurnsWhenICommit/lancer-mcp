@@ -1,8 +1,8 @@
-using System.Net.Http;
 using LancerMcp.Configuration;
 using LancerMcp.Models;
 using LancerMcp.Repositories;
 using LancerMcp.Services;
+using LancerMcp.Tests.Mocks;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Xunit;
@@ -26,7 +26,7 @@ public sealed class QueryOrchestratorSimilarityTests
             symbolSearchRepository,
             new ThrowingEdgeRepository(),
             new FakeFingerprintRepository(null),
-            new EmbeddingService(new HttpClient(), optionsMonitor, NullLogger<EmbeddingService>.Instance),
+            new TestEmbeddingProvider(),
             optionsMonitor);
 
         var response = await orchestrator.QueryAsync(
@@ -52,7 +52,7 @@ public sealed class QueryOrchestratorSimilarityTests
             new FakeSymbolSearchRepository(),
             new ThrowingEdgeRepository(),
             new FakeFingerprintRepository(null),
-            new EmbeddingService(new HttpClient(), optionsMonitor, NullLogger<EmbeddingService>.Instance),
+            new TestEmbeddingProvider(),
             optionsMonitor);
 
         var response = await orchestrator.QueryAsync(
@@ -96,7 +96,7 @@ public sealed class QueryOrchestratorSimilarityTests
             new FakeSymbolSearchRepository(),
             new ThrowingEdgeRepository(),
             new FakeFingerprintRepository(null),
-            new EmbeddingService(new HttpClient(), optionsMonitor, NullLogger<EmbeddingService>.Instance),
+            new TestEmbeddingProvider(),
             optionsMonitor);
 
         var response = await orchestrator.QueryAsync(
@@ -211,7 +211,7 @@ public sealed class QueryOrchestratorSimilarityTests
             symbolSearchRepository,
             new ThrowingEdgeRepository(),
             fingerprintRepository,
-            new EmbeddingService(new HttpClient(), optionsMonitor, NullLogger<EmbeddingService>.Instance),
+            new TestEmbeddingProvider(),
             optionsMonitor);
 
         var response = await orchestrator.QueryAsync(

@@ -20,6 +20,7 @@ public sealed class QueryEmbeddingModelResolutionTests
         var options = new TestOptionsMonitor(new ServerOptions
         {
             DefaultRetrievalProfile = RetrievalProfile.Hybrid,
+            EmbeddingsEnabled = true,
             EmbeddingModel = "model-a"
         });
 
@@ -31,7 +32,7 @@ public sealed class QueryEmbeddingModelResolutionTests
             new ThrowingSymbolSearchRepository(),
             new ThrowingEdgeRepository(),
             new ThrowingSymbolFingerprintRepository(),
-            new EmbeddingService(new System.Net.Http.HttpClient(), options, NullLogger<EmbeddingService>.Instance),
+            new TestEmbeddingProvider(),
             options);
 
         var response = await orchestrator.QueryAsync(
@@ -52,6 +53,7 @@ public sealed class QueryEmbeddingModelResolutionTests
         var options = new TestOptionsMonitor(new ServerOptions
         {
             DefaultRetrievalProfile = RetrievalProfile.Hybrid,
+            EmbeddingsEnabled = true,
             EmbeddingModel = ""
         });
 
@@ -63,7 +65,7 @@ public sealed class QueryEmbeddingModelResolutionTests
             new ThrowingSymbolSearchRepository(),
             new ThrowingEdgeRepository(),
             new ThrowingSymbolFingerprintRepository(),
-            new EmbeddingService(new System.Net.Http.HttpClient(), options, NullLogger<EmbeddingService>.Instance),
+            new TestEmbeddingProvider(),
             options);
 
         var response = await orchestrator.QueryAsync(
@@ -84,6 +86,7 @@ public sealed class QueryEmbeddingModelResolutionTests
         var options = new TestOptionsMonitor(new ServerOptions
         {
             DefaultRetrievalProfile = RetrievalProfile.Hybrid,
+            EmbeddingsEnabled = true,
             EmbeddingModel = "model-a"
         });
 
@@ -95,7 +98,7 @@ public sealed class QueryEmbeddingModelResolutionTests
             new ThrowingSymbolSearchRepository(),
             new ThrowingEdgeRepository(),
             new ThrowingSymbolFingerprintRepository(),
-            new EmbeddingService(new System.Net.Http.HttpClient(), options, NullLogger<EmbeddingService>.Instance),
+            new TestEmbeddingProvider(),
             options);
 
         var response = await orchestrator.QueryAsync(

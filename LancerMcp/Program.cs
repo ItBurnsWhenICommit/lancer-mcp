@@ -91,6 +91,9 @@ builder.Services.AddHttpClient<EmbeddingService>((serviceProvider, client) =>
     client.Timeout = TimeSpan.FromSeconds(options.CurrentValue.EmbeddingTimeoutSeconds);
 });
 
+builder.Services.AddTransient<IEmbeddingProvider>(serviceProvider =>
+    serviceProvider.GetRequiredService<EmbeddingService>());
+
 builder.Services.AddSingleton<IndexingService>();
 builder.Services.AddHostedService<GitTrackerHostedService>();
 builder.Services.AddHostedService<BranchCleanupHostedService>();

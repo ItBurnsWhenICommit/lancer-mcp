@@ -41,3 +41,10 @@
 - added embedding_jobs table and performance indexes for job claiming
 - added embeddings.dims column to schema
 - documented embedding_jobs and dims in SCHEMA.md
+
+## [phase 4B] embedding provider abstraction and fallback codes
+
+- added IEmbeddingProvider contract and provider result shape
+- routed QueryOrchestrator through IEmbeddingProvider with stable fallback reasons
+- added fallback tests for disabled/unavailable/missing/invalid query embeddings
+- documented embedding fallback metadata in retrieval profiles
