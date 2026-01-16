@@ -34,3 +34,10 @@
 - added banded candidate lookup, Hamming distance ranking, and post-filter terms
 - added snippet lookup by symbol id for compact similarity results
 - include error metadata in compact response payloads
+
+## [phase 4A] schema safety for optional embeddings
+
+- added schema verification test for embedding_jobs, embeddings.dims, and job indexes
+- added embedding_jobs table and performance indexes for job claiming
+- added embeddings.dims column to schema
+- documented embedding_jobs and dims in SCHEMA.md
