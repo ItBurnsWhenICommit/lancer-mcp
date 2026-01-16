@@ -1,4 +1,7 @@
-using System.Net.Http;
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 using LancerMcp.Configuration;
 using LancerMcp.Models;
 using LancerMcp.Repositories;
@@ -9,77 +12,138 @@ using Xunit;
 
 namespace LancerMcp.Tests;
 
-public sealed class QueryProfileSelectionTests
+public sealed class QueryEmbeddingModelResolutionTests
 {
     [Fact]
-    public async Task QueryAsync_DefaultsToFastProfile()
+    public async Task MissingModel_UsesDefaultModel()
     {
-        var options = new ServerOptions { DefaultRetrievalProfile = RetrievalProfile.Fast };
-        var optionsMonitor = new TestOptionsMonitor(options);
+        var options = new TestOptionsMonitor(new ServerOptions
+        {
+            DefaultRetrievalProfile = RetrievalProfile.Hybrid,
+            EmbeddingModel = "model-a"
+        });
+
         var orchestrator = new QueryOrchestrator(
             NullLogger<QueryOrchestrator>.Instance,
-            new ThrowingCodeChunkRepository(),
-            new ThrowingEmbeddingRepository(),
-            new ReturningSymbolRepository(),
+            new FakeChunkRepository(),
+            new FakeEmbeddingRepository("model-a", 2),
+            new ThrowingSymbolRepository(),
             new ThrowingSymbolSearchRepository(),
             new ThrowingEdgeRepository(),
             new ThrowingSymbolFingerprintRepository(),
-            new EmbeddingService(new HttpClient(), optionsMonitor, NullLogger<EmbeddingService>.Instance),
-            optionsMonitor);
+            new EmbeddingService(new System.Net.Http.HttpClient(), options, NullLogger<EmbeddingService>.Instance),
+            options);
 
         var response = await orchestrator.QueryAsync(
-            query: "find UserService",
+            query: "db",
             repositoryName: "repo",
-            branchName: "main");
+            branchName: "main",
+            profileOverride: RetrievalProfile.Hybrid,
+            queryEmbeddingBase64: Convert.ToBase64String(new byte[8]),
+            queryEmbeddingDims: 2,
+            queryEmbeddingModel: null);
 
-        Assert.NotNull(response.Metadata);
-        Assert.Equal("Fast", response.Metadata?["profile"]?.ToString());
+        Assert.Equal("model-a", response.Metadata?["embeddingModel"]);
     }
 
-    private sealed class ReturningSymbolRepository : ISymbolRepository
+    [Fact]
+    public async Task AmbiguousModel_FallsBackWithError()
     {
-        public Task<IEnumerable<Symbol>> SearchByNameAsync(string repoId, string query, string? branchName = null, bool fuzzy = false, int limit = 50, CancellationToken cancellationToken = default)
+        var options = new TestOptionsMonitor(new ServerOptions
         {
-            var symbol = new Symbol
-            {
-                RepositoryName = repoId,
-                BranchName = branchName ?? "main",
-                CommitSha = "sha",
-                FilePath = "src/UserService.cs",
-                Name = "UserService",
-                QualifiedName = "Demo.UserService",
-                Kind = SymbolKind.Class,
-                Language = Language.CSharp,
-                StartLine = 1,
-                StartColumn = 1,
-                EndLine = 5,
-                EndColumn = 1
-            };
+            DefaultRetrievalProfile = RetrievalProfile.Hybrid,
+            EmbeddingModel = ""
+        });
 
-            return Task.FromResult<IEnumerable<Symbol>>(new[] { symbol });
+        var orchestrator = new QueryOrchestrator(
+            NullLogger<QueryOrchestrator>.Instance,
+            new FakeChunkRepository(),
+            new FakeEmbeddingRepository("model-a", 2, "model-b"),
+            new ThrowingSymbolRepository(),
+            new ThrowingSymbolSearchRepository(),
+            new ThrowingEdgeRepository(),
+            new ThrowingSymbolFingerprintRepository(),
+            new EmbeddingService(new System.Net.Http.HttpClient(), options, NullLogger<EmbeddingService>.Instance),
+            options);
+
+        var response = await orchestrator.QueryAsync(
+            query: "db",
+            repositoryName: "repo",
+            branchName: "main",
+            profileOverride: RetrievalProfile.Hybrid,
+            queryEmbeddingBase64: Convert.ToBase64String(new byte[8]),
+            queryEmbeddingDims: 2,
+            queryEmbeddingModel: null);
+
+        Assert.Equal("embedding_model_ambiguous", response.Metadata?["errorCode"]);
+    }
+
+    [Fact]
+    public async Task DimsMismatch_FallsBackWithError()
+    {
+        var options = new TestOptionsMonitor(new ServerOptions
+        {
+            DefaultRetrievalProfile = RetrievalProfile.Hybrid,
+            EmbeddingModel = "model-a"
+        });
+
+        var orchestrator = new QueryOrchestrator(
+            NullLogger<QueryOrchestrator>.Instance,
+            new FakeChunkRepository(),
+            new FakeEmbeddingRepository("model-a", 3),
+            new ThrowingSymbolRepository(),
+            new ThrowingSymbolSearchRepository(),
+            new ThrowingEdgeRepository(),
+            new ThrowingSymbolFingerprintRepository(),
+            new EmbeddingService(new System.Net.Http.HttpClient(), options, NullLogger<EmbeddingService>.Instance),
+            options);
+
+        var response = await orchestrator.QueryAsync(
+            query: "db",
+            repositoryName: "repo",
+            branchName: "main",
+            profileOverride: RetrievalProfile.Hybrid,
+            queryEmbeddingBase64: Convert.ToBase64String(new byte[8]),
+            queryEmbeddingDims: 2,
+            queryEmbeddingModel: null);
+
+        Assert.Equal("embedding_dims_mismatch", response.Metadata?["errorCode"]);
+    }
+
+    private sealed class FakeChunkRepository : ICodeChunkRepository
+    {
+        public Task<IEnumerable<CodeChunk>> SearchFullTextAsync(
+            string repoId,
+            string query,
+            string? branchName = null,
+            Language? language = null,
+            int limit = 50,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<IEnumerable<CodeChunk>>(new[]
+            {
+                new CodeChunk
+                {
+                    Id = "chunk1",
+                    RepositoryName = repoId,
+                    BranchName = branchName ?? "main",
+                    CommitSha = "sha",
+                    FilePath = "src/Db.cs",
+                    Language = Language.CSharp,
+                    Content = "database",
+                    StartLine = 1,
+                    EndLine = 2,
+                    ChunkStartLine = 1,
+                    ChunkEndLine = 2
+                }
+            });
         }
 
-        public Task<Symbol?> GetByIdAsync(string id, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<IEnumerable<Symbol>> GetByIdsAsync(IEnumerable<string> symbolIds, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<IEnumerable<Symbol>> GetByFileAsync(string repoId, string branchName, string filePath, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<IEnumerable<Symbol>> GetByBranchAsync(string repoId, string branchName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<IEnumerable<Symbol>> GetByKindAsync(string repoId, SymbolKind kind, int limit = 100, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<Symbol> CreateAsync(Symbol symbol, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<int> CreateBatchAsync(IEnumerable<Symbol> symbols, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<bool> DeleteAsync(string id, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<int> DeleteByRepoIdAsync(string repoId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<int> DeleteByBranchAsync(string repoId, string branchName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<int> DeleteByFileAsync(string repoId, string branchName, string filePath, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    }
-
-    private sealed class ThrowingCodeChunkRepository : ICodeChunkRepository
-    {
         public Task<CodeChunk?> GetByIdAsync(string id, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IEnumerable<CodeChunk>> GetByFileAsync(string repoId, string branchName, string filePath, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IEnumerable<CodeChunk>> GetBySymbolAsync(string symbolId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IEnumerable<CodeChunk>> GetByBranchAsync(string repoId, string branchName, int limit = 1000, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IEnumerable<CodeChunk>> GetByLanguageAsync(string repoId, Language language, int limit = 1000, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<IEnumerable<CodeChunk>> SearchFullTextAsync(string repoId, string query, string? branchName = null, Language? language = null, int limit = 50, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<CodeChunk> CreateAsync(CodeChunk chunk, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<int> CreateBatchAsync(IEnumerable<CodeChunk> chunks, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<bool> DeleteAsync(string id, CancellationToken cancellationToken = default) => throw new NotImplementedException();
@@ -89,8 +153,30 @@ public sealed class QueryProfileSelectionTests
         public Task<int> GetCountAsync(string repoId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
     }
 
-    private sealed class ThrowingEmbeddingRepository : IEmbeddingRepository
+    private sealed class FakeEmbeddingRepository : IEmbeddingRepository
     {
+        private readonly List<string> _models;
+        private readonly int _dims;
+
+        public FakeEmbeddingRepository(string primaryModel, int dims, string? secondaryModel = null)
+        {
+            _models = new List<string> { primaryModel };
+            if (!string.IsNullOrWhiteSpace(secondaryModel))
+            {
+                _models.Add(secondaryModel);
+            }
+            _dims = dims;
+        }
+
+        public Task<IReadOnlyList<string>> GetModelsAsync(string repoId, string? branchName = null, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<string>>(_models);
+
+        public Task<int?> GetModelDimsAsync(string repoId, string? branchName, string model, CancellationToken cancellationToken = default)
+            => Task.FromResult<int?>(_dims);
+
+        public Task<bool> HasAnyEmbeddingsAsync(string repoId, string? branchName, string model, CancellationToken cancellationToken = default)
+            => Task.FromResult(_models.Contains(model));
+
         public Task<Embedding?> GetByIdAsync(string id, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<Embedding?> GetByChunkIdAsync(string chunkId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IEnumerable<Embedding>> GetByBranchAsync(string repoId, string branchName, int limit = 1000, CancellationToken cancellationToken = default) => throw new NotImplementedException();
@@ -103,9 +189,22 @@ public sealed class QueryProfileSelectionTests
         public Task<int> DeleteByBranchAsync(string repoId, string branchName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<int> GetCountAsync(string repoId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<bool> ExistsForChunkAsync(string chunkId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<IReadOnlyList<string>> GetModelsAsync(string repoId, string? branchName = null, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<int?> GetModelDimsAsync(string repoId, string? branchName, string model, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<bool> HasAnyEmbeddingsAsync(string repoId, string? branchName, string model, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    }
+
+    private sealed class ThrowingSymbolRepository : ISymbolRepository
+    {
+        public Task<Symbol?> GetByIdAsync(string id, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IEnumerable<Symbol>> GetByIdsAsync(IEnumerable<string> symbolIds, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IEnumerable<Symbol>> GetByFileAsync(string repoId, string branchName, string filePath, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IEnumerable<Symbol>> GetByBranchAsync(string repoId, string branchName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IEnumerable<Symbol>> SearchByNameAsync(string repoId, string query, string? branchName = null, bool fuzzy = false, int limit = 50, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IEnumerable<Symbol>> GetByKindAsync(string repoId, SymbolKind kind, int limit = 100, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<Symbol> CreateAsync(Symbol symbol, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<int> CreateBatchAsync(IEnumerable<Symbol> symbols, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<bool> DeleteAsync(string id, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<int> DeleteByRepoIdAsync(string repoId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<int> DeleteByBranchAsync(string repoId, string branchName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<int> DeleteByFileAsync(string repoId, string branchName, string filePath, CancellationToken cancellationToken = default) => throw new NotImplementedException();
     }
 
     private sealed class ThrowingSymbolSearchRepository : ISymbolSearchRepository

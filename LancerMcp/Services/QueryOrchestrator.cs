@@ -124,6 +124,9 @@ public sealed class QueryOrchestrator
         Language? language = null,
         int maxResults = 50,
         RetrievalProfile? profileOverride = null,
+        string? queryEmbeddingBase64 = null,
+        int? queryEmbeddingDims = null,
+        string? queryEmbeddingModel = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(repositoryName))
@@ -139,6 +142,70 @@ public sealed class QueryOrchestrator
             var profile = profileOverride ?? _options.CurrentValue.DefaultRetrievalProfile;
             var parsedQuery = ParseQuery(query, repositoryName, branchName, language, maxResults, profile);
             _logger.LogInformation("Query intent detected: {Intent} for repository: {Repository}", parsedQuery.Intent, repositoryName);
+
+            var embeddingParse = QueryEmbeddingParser.TryParse(
+                queryEmbeddingBase64,
+                queryEmbeddingDims,
+                queryEmbeddingModel,
+                maxDims: 4096);
+
+            string? resolvedEmbeddingModel = null;
+            string? embeddingErrorCode = null;
+            string? embeddingError = null;
+
+            if (embeddingParse.Success)
+            {
+                if (!string.IsNullOrWhiteSpace(embeddingParse.Model))
+                {
+                    resolvedEmbeddingModel = embeddingParse.Model;
+                }
+                else if (!string.IsNullOrWhiteSpace(_options.CurrentValue.EmbeddingModel))
+                {
+                    resolvedEmbeddingModel = _options.CurrentValue.EmbeddingModel.Trim().ToLowerInvariant();
+                }
+                else
+                {
+                    var models = await _embeddingRepository.GetModelsAsync(repositoryName, branchName, cancellationToken);
+                    if (models.Count == 1)
+                    {
+                        resolvedEmbeddingModel = models[0];
+                    }
+                    else
+                    {
+                        embeddingErrorCode = "embedding_model_ambiguous";
+                        embeddingError = "Multiple embedding models found; specify queryEmbeddingModel.";
+                    }
+                }
+
+                if (resolvedEmbeddingModel != null && embeddingErrorCode == null)
+                {
+                    var hasEmbeddings = await _embeddingRepository.HasAnyEmbeddingsAsync(
+                        repositoryName,
+                        branchName,
+                        resolvedEmbeddingModel,
+                        cancellationToken);
+
+                    if (!hasEmbeddings)
+                    {
+                        embeddingErrorCode = "embedding_model_not_found";
+                        embeddingError = $"No embeddings found for model '{resolvedEmbeddingModel}'.";
+                    }
+                    else
+                    {
+                        var modelDims = await _embeddingRepository.GetModelDimsAsync(
+                            repositoryName,
+                            branchName,
+                            resolvedEmbeddingModel,
+                            cancellationToken);
+
+                        if (modelDims.HasValue && embeddingParse.Vector != null && modelDims.Value != embeddingParse.Vector.Length)
+                        {
+                            embeddingErrorCode = "embedding_dims_mismatch";
+                            embeddingError = "Query embedding dims do not match stored embeddings.";
+                        }
+                    }
+                }
+            }
 
             // Step 2: Execute search based on intent
             Dictionary<string, object>? errorMetadata = null;
@@ -173,6 +240,30 @@ public sealed class QueryOrchestrator
                 ["branch"] = branchName ?? "all",
                 ["profile"] = parsedQuery.Profile.ToString()
             };
+
+            metadata["embeddingUsed"] = false;
+            metadata["fallback"] = parsedQuery.Profile switch
+            {
+                RetrievalProfile.Semantic => "semantic->hybrid->fast",
+                RetrievalProfile.Hybrid => "hybrid->fast",
+                _ => "fast"
+            };
+
+            if (resolvedEmbeddingModel != null)
+            {
+                metadata["embeddingModel"] = resolvedEmbeddingModel;
+            }
+
+            if (!embeddingParse.Success && parsedQuery.Profile != RetrievalProfile.Fast)
+            {
+                metadata["errorCode"] = embeddingParse.ErrorCode!;
+                metadata["error"] = embeddingParse.Error!;
+            }
+            else if (embeddingErrorCode != null && parsedQuery.Profile != RetrievalProfile.Fast)
+            {
+                metadata["errorCode"] = embeddingErrorCode;
+                metadata["error"] = embeddingError ?? string.Empty;
+            }
 
             if (errorMetadata != null)
             {
@@ -1101,86 +1192,7 @@ public sealed class QueryOrchestrator
         ParsedQuery parsedQuery,
         CancellationToken cancellationToken)
     {
-        var results = new List<SearchResult>();
-
-        try
-        {
-            // Generate embedding for the query
-            // Create a temporary chunk for the query text
-            var queryChunk = new CodeChunk
-            {
-                Id = Guid.NewGuid().ToString(),
-                RepositoryName = parsedQuery.RepositoryName ?? string.Empty,
-                BranchName = parsedQuery.BranchName ?? string.Empty,
-                CommitSha = string.Empty,
-                FilePath = string.Empty,
-                Language = Language.Unknown,
-                Content = parsedQuery.OriginalQuery,
-                StartLine = 0,
-                EndLine = 0,
-                ChunkStartLine = 0,
-                ChunkEndLine = 0,
-                CreatedAt = DateTimeOffset.UtcNow
-            };
-
-            var embeddings = await _embeddingService.GenerateEmbeddingsAsync(
-                new[] { queryChunk },
-                cancellationToken);
-
-            if (embeddings.Count == 0 || embeddings[0].Vector.Length == 0)
-            {
-                _logger.LogWarning("Failed to generate embedding, falling back to full-text search only");
-                return await ExecuteFullTextSearchOnlyAsync(parsedQuery, cancellationToken);
-            }
-
-            var queryEmbedding = embeddings[0].Vector;
-
-            // Execute hybrid search using the database function
-            var hybridResults = await _embeddingRepository.HybridSearchAsync(
-                queryText: parsedQuery.OriginalQuery,
-                queryVector: queryEmbedding,
-                repoId: parsedQuery.RepositoryName,
-                branchName: parsedQuery.BranchName,
-                bm25Weight: 0.3f,
-                vectorWeight: 0.7f,
-                limit: parsedQuery.MaxResults * 2, // Get more results for re-ranking
-                cancellationToken);
-
-            // Convert to SearchResult objects
-            foreach (var (chunkId, score, bm25Score, vectorScore) in hybridResults)
-            {
-                var chunk = await _chunkRepository.GetByIdAsync(chunkId, cancellationToken);
-                if (chunk == null)
-                    continue;
-
-                results.Add(new SearchResult
-                {
-                    Id = chunk.Id,
-                    Type = "code_chunk",
-                    Repository = chunk.RepositoryName,
-                    Branch = chunk.BranchName,
-                    FilePath = chunk.FilePath,
-                    Language = chunk.Language,
-                    SymbolName = chunk.SymbolName,
-                    SymbolKind = chunk.SymbolKind,
-                    Content = chunk.Content,
-                    StartLine = chunk.ChunkStartLine,
-                    EndLine = chunk.ChunkEndLine,
-                    Score = score,
-                    BM25Score = bm25Score,
-                    VectorScore = vectorScore,
-                    Signature = chunk.Signature,
-                    Documentation = chunk.Documentation
-                });
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error in hybrid search, falling back to full-text search");
-            return await ExecuteFullTextSearchOnlyAsync(parsedQuery, cancellationToken);
-        }
-
-        return results;
+        return await ExecuteFullTextSearchOnlyAsync(parsedQuery, cancellationToken);
     }
 
     /// <summary>

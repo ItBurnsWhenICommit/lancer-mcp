@@ -253,6 +253,45 @@ public sealed class EmbeddingRepository : IEmbeddingRepository
         return await _db.ExecuteScalarAsync<bool>(sql, new { ChunkId = chunkId }, cancellationToken);
     }
 
+    public async Task<IReadOnlyList<string>> GetModelsAsync(string repoId, string? branchName = null, CancellationToken cancellationToken = default)
+    {
+        const string sql = @"
+            SELECT DISTINCT model
+            FROM embeddings
+            WHERE repo_id = @RepoId
+              AND (@BranchName IS NULL OR branch_name = @BranchName)";
+
+        var rows = await _db.QueryAsync<string>(sql, new { RepoId = repoId, BranchName = branchName }, cancellationToken);
+        return rows.Select(model => model.ToLowerInvariant()).Distinct().ToList();
+    }
+
+    public async Task<int?> GetModelDimsAsync(string repoId, string? branchName, string model, CancellationToken cancellationToken = default)
+    {
+        const string sql = @"
+            SELECT dims
+            FROM embeddings
+            WHERE repo_id = @RepoId
+              AND model = @Model
+              AND (@BranchName IS NULL OR branch_name = @BranchName)
+            LIMIT 1";
+
+        return await _db.ExecuteScalarAsync<int?>(sql, new { RepoId = repoId, BranchName = branchName, Model = model }, cancellationToken);
+    }
+
+    public async Task<bool> HasAnyEmbeddingsAsync(string repoId, string? branchName, string model, CancellationToken cancellationToken = default)
+    {
+        const string sql = @"
+            SELECT EXISTS(
+                SELECT 1
+                FROM embeddings
+                WHERE repo_id = @RepoId
+                  AND model = @Model
+                  AND (@BranchName IS NULL OR branch_name = @BranchName)
+            )";
+
+        return await _db.ExecuteScalarAsync<bool>(sql, new { RepoId = repoId, BranchName = branchName, Model = model }, cancellationToken);
+    }
+
     private static Embedding MapToEmbedding(dynamic result)
     {
         // Parse the vector string representation back to float array
@@ -273,4 +312,3 @@ public sealed class EmbeddingRepository : IEmbeddingRepository
         };
     }
 }
-

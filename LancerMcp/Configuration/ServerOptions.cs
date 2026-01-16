@@ -126,6 +126,11 @@ public sealed class ServerOptions
     public string? EmbeddingServiceUrl { get; set; }
 
     /// <summary>
+    /// Enables optional embeddings and background job processing.
+    /// </summary>
+    public bool EmbeddingsEnabled { get; set; } = false;
+
+    /// <summary>
     /// Model name for embeddings (informational, TEI is configured with the model at startup).
     /// </summary>
     public string EmbeddingModel { get; set; } = "jinaai/jina-embeddings-v2-base-code";
@@ -139,6 +144,26 @@ public sealed class ServerOptions
     /// Timeout for embedding service requests in seconds.
     /// </summary>
     public int EmbeddingTimeoutSeconds { get; set; } = 60;
+
+    /// <summary>
+    /// Batch size for embedding job processing.
+    /// </summary>
+    public int EmbeddingJobsBatchSize { get; set; } = 64;
+
+    /// <summary>
+    /// Maximum attempts for embedding jobs before completing with error.
+    /// </summary>
+    public int EmbeddingJobsMaxAttempts { get; set; } = 10;
+
+    /// <summary>
+    /// Stale lock threshold for embedding jobs (minutes).
+    /// </summary>
+    public int EmbeddingJobsStaleMinutes { get; set; } = 10;
+
+    /// <summary>
+    /// Number of days to retain completed embedding jobs.
+    /// </summary>
+    public int EmbeddingJobsPurgeDays { get; set; } = 7;
 
     /// <summary>
     /// Number of lines of context to include before each symbol when chunking.

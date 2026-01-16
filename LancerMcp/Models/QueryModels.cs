@@ -462,6 +462,21 @@ public sealed class QueryResponse
             payload["errorCode"] = errorCode;
         }
 
+        if (Metadata?.TryGetValue("embeddingUsed", out var embeddingUsed) == true)
+        {
+            payload["embeddingUsed"] = embeddingUsed;
+        }
+
+        if (Metadata?.TryGetValue("embeddingModel", out var embeddingModel) == true)
+        {
+            payload["embeddingModel"] = embeddingModel;
+        }
+
+        if (Metadata?.TryGetValue("fallback", out var fallback) == true)
+        {
+            payload["fallback"] = fallback;
+        }
+
         if (Metadata?.TryGetValue("error", out var errorMessage) == true)
         {
             payload["error"] = errorMessage;
