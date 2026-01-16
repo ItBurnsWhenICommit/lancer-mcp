@@ -158,12 +158,13 @@ public sealed class EmbeddingRepository : IEmbeddingRepository
     public async Task<Embedding> CreateAsync(Embedding embedding, CancellationToken cancellationToken = default)
     {
         const string sql = @"
-            INSERT INTO embeddings (id, chunk_id, repo_id, branch_name, commit_sha, vector,
+            INSERT INTO embeddings (id, chunk_id, repo_id, branch_name, commit_sha, vector, dims,
                                     model, model_version, generated_at)
-            VALUES (@Id, @ChunkId, @RepositoryName, @BranchName, @CommitSha, @Vector::vector,
+            VALUES (@Id, @ChunkId, @RepositoryName, @BranchName, @CommitSha, @Vector::vector, @Dims,
                     @Model, @ModelVersion, @GeneratedAt)
             ON CONFLICT (chunk_id) DO UPDATE
             SET vector = EXCLUDED.vector,
+                dims = EXCLUDED.dims,
                 model = EXCLUDED.model,
                 model_version = EXCLUDED.model_version,
                 generated_at = EXCLUDED.generated_at
@@ -178,6 +179,7 @@ public sealed class EmbeddingRepository : IEmbeddingRepository
             embedding.BranchName,
             embedding.CommitSha,
             Vector = vector.ToString(),
+            Dims = embedding.Vector.Length,
             embedding.Model,
             embedding.ModelVersion,
             embedding.GeneratedAt
@@ -189,12 +191,13 @@ public sealed class EmbeddingRepository : IEmbeddingRepository
     public async Task<int> CreateBatchAsync(IEnumerable<Embedding> embeddings, CancellationToken cancellationToken = default)
     {
         const string sql = @"
-            INSERT INTO embeddings (id, chunk_id, repo_id, branch_name, commit_sha, vector,
+            INSERT INTO embeddings (id, chunk_id, repo_id, branch_name, commit_sha, vector, dims,
                                     model, model_version, generated_at)
-            VALUES (@Id, @ChunkId, @RepositoryName, @BranchName, @CommitSha, @Vector::vector,
+            VALUES (@Id, @ChunkId, @RepositoryName, @BranchName, @CommitSha, @Vector::vector, @Dims,
                     @Model, @ModelVersion, @GeneratedAt)
             ON CONFLICT (chunk_id) DO UPDATE
             SET vector = EXCLUDED.vector,
+                dims = EXCLUDED.dims,
                 model = EXCLUDED.model,
                 model_version = EXCLUDED.model_version,
                 generated_at = EXCLUDED.generated_at";
@@ -207,6 +210,7 @@ public sealed class EmbeddingRepository : IEmbeddingRepository
             e.BranchName,
             e.CommitSha,
             Vector = new Vector(e.Vector).ToString(),
+            Dims = e.Vector.Length,
             e.Model,
             e.ModelVersion,
             e.GeneratedAt

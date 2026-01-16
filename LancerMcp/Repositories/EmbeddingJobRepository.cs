@@ -89,6 +89,20 @@ public sealed class EmbeddingJobRepository : IEmbeddingJobRepository
         return _db.ExecuteAsync(sql, new { Id = jobId, Dims = dims, LastError = lastError }, cancellationToken);
     }
 
+    public Task MarkBlockedAsync(string jobId, string? lastError, CancellationToken cancellationToken = default)
+    {
+        const string sql = @"
+            UPDATE embedding_jobs
+            SET status = 'Blocked',
+                last_error = @LastError,
+                locked_at = NULL,
+                locked_by = NULL,
+                updated_at = NOW()
+            WHERE id = @Id";
+
+        return _db.ExecuteAsync(sql, new { Id = jobId, LastError = lastError }, cancellationToken);
+    }
+
     public Task RequeueAsync(string jobId, DateTimeOffset nextAttemptAt, string? lastError, CancellationToken cancellationToken = default)
     {
         const string sql = @"

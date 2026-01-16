@@ -55,6 +55,9 @@ public sealed class EmbeddingJobEnqueuerTests
         public Task MarkCompletedAsync(string jobId, int? dims, string? lastError, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
+        public Task MarkBlockedAsync(string jobId, string? lastError, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
         public Task RequeueAsync(string jobId, System.DateTimeOffset nextAttemptAt, string? lastError, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 

@@ -48,3 +48,11 @@
 - routed QueryOrchestrator through IEmbeddingProvider with stable fallback reasons
 - added fallback tests for disabled/unavailable/missing/invalid query embeddings
 - documented embedding fallback metadata in retrieval profiles
+
+## [phase 4C] embedding job worker and retries
+
+- added embedding job worker with bounded claim/retry/backoff behavior
+- added job error codes and blocked terminal state for max attempts
+- added worker hosted service and job repository blocked update
+- persisted embedding dims on insert/update
+- added worker tests for completion, missing chunks, retries, and max attempts
