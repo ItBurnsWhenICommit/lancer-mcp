@@ -1,6 +1,6 @@
 # Phase 4 Optional Embeddings Completion Addendum
 
-Purpose: Define Phase 4A–4E execution order and gates. Detailed steps remain in the existing Phase 4 plan and design docs.
+Purpose: Define Phase 4A-4E execution order and gates. Detailed steps remain in the existing Phase 4 plan and design docs.
 
 References:
 - docs/plans/2026-01-16-phase4-optional-embeddings.md
