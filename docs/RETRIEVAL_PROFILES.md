@@ -10,13 +10,14 @@
 
 ## Hybrid
 
-- Fast profile plus optional embeddings over code chunks
+- Fast profile plus optional vector rerank over primary chunks for Fast candidates
 - Query embeddings are client-supplied; the server does not generate query embeddings
 - Embeddings used only when available and query embeddings are valid
+- Rerank uses a sparse/vector blend (default 0.7/0.3) and preserves Fast order for candidates without embeddings
 
 ## Semantic
 
-- Embeddings-first ranking when query embeddings are valid
+- Fast candidates with a heavier vector weight (default 0.3/0.7)
 - Falls back to Hybrid/Fast when embeddings are unavailable or query embeddings are missing/invalid
 
 ### Embedding Metadata + Fallbacks

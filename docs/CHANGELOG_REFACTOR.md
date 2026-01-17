@@ -56,3 +56,10 @@
 - added worker hosted service and job repository blocked update
 - persisted embedding dims on insert/update
 - added worker tests for completion, missing chunks, retries, and max attempts
+
+## [phase 4D] hybrid/semantic rerank over fast candidates
+
+- reranked Hybrid/Semantic results using Fast symbol candidates plus chunk embeddings
+- added candidate cap and stable ordering with Fast tie-breaks
+- added embedding lookup by chunk ids for rerank
+- added rerank tests and updated model resolution scaffolding

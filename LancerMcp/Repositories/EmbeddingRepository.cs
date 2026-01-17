@@ -45,6 +45,48 @@ public sealed class EmbeddingRepository : IEmbeddingRepository
         return result != null ? MapToEmbedding(result) : null;
     }
 
+    public async Task<IReadOnlyList<Embedding>> GetByChunkIdsAsync(
+        string repoId,
+        string? branchName,
+        string model,
+        IReadOnlyList<string> chunkIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(repoId))
+        {
+            throw new ArgumentException("Repository ID is required. Multi-repo queries are not supported.", nameof(repoId));
+        }
+
+        if (chunkIds.Count == 0)
+        {
+            return Array.Empty<Embedding>();
+        }
+
+        var sql = @"
+            SELECT id, chunk_id AS ChunkId, repo_id AS RepositoryName, branch_name AS BranchName,
+                   commit_sha AS CommitSha, vector::text AS Vector, model, model_version AS ModelVersion,
+                   generated_at AS GeneratedAt
+            FROM embeddings
+            WHERE repo_id = @RepoId
+              AND model = @Model
+              AND chunk_id = ANY(@ChunkIds)";
+
+        if (!string.IsNullOrWhiteSpace(branchName))
+        {
+            sql += " AND branch_name = @BranchName";
+        }
+
+        var results = await _db.QueryAsync<dynamic>(sql, new
+        {
+            RepoId = repoId,
+            BranchName = branchName,
+            Model = model,
+            ChunkIds = chunkIds.ToArray()
+        }, cancellationToken);
+
+        return results.Select(MapToEmbedding).ToList();
+    }
+
     public async Task<IEnumerable<Embedding>> GetByBranchAsync(string repoId, string branchName, int limit = 1000, CancellationToken cancellationToken = default)
     {
         const string sql = @"
