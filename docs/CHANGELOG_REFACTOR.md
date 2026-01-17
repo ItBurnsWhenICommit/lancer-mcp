@@ -63,3 +63,9 @@
 - added candidate cap and stable ordering with Fast tie-breaks
 - added embedding lookup by chunk ids for rerank
 - added rerank tests and updated model resolution scaffolding
+
+## [phase 4E] benchmarks, docs, and cleanup
+
+- documented profile comparison workflow and Phase 4E benchmark results
+- clarified schema notes for embedding dims and job indexes
+- updated retrieval profile semantics for Fast-first rerank

@@ -13,6 +13,7 @@
 - Fast profile plus optional vector rerank over primary chunks for Fast candidates
 - Query embeddings are client-supplied; the server does not generate query embeddings
 - Embeddings used only when available and query embeddings are valid
+- Candidate set: Fast symbol top-N (bounded), map to primary chunk per symbol
 - Rerank uses a sparse/vector blend (default 0.7/0.3) and preserves Fast order for candidates without embeddings
 
 ## Semantic

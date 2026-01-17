@@ -64,12 +64,14 @@
 ### embeddings
 - `chunk_id`, `repo_id`, `branch_name`, `commit_sha`
 - `vector`, `dims`, `model`, `model_version`, `generated_at`
+- `dims` records vector length for validation; nullable until first embedding write
 
 ### embedding_jobs
 - `repo_id`, `branch_name`, `commit_sha`
 - `target_kind`, `target_id`
 - `model`, `dims`, `status`, `attempts`
 - `next_attempt_at`, `last_error`, `locked_at`, `locked_by`
+- Indexes: `(status, next_attempt_at)` for scheduling and `(status, locked_at)` for stale claim recovery
 
 ## Rationale
 
