@@ -1,4 +1,3 @@
-using System.Net.Http;
 using LancerMcp.Configuration;
 using LancerMcp.Models;
 using LancerMcp.Repositories;
@@ -27,7 +26,7 @@ public sealed class FastRetrievalTests
             symbolSearchRepository,
             new ThrowingEdgeRepository(),
             new ThrowingSymbolFingerprintRepository(),
-            new EmbeddingService(new HttpClient(), optionsMonitor, NullLogger<EmbeddingService>.Instance),
+            new TestEmbeddingProvider(),
             optionsMonitor);
 
         var response = await orchestrator.QueryAsync(
@@ -123,6 +122,8 @@ public sealed class FastRetrievalTests
     {
         public Task<Embedding?> GetByIdAsync(string id, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<Embedding?> GetByChunkIdAsync(string chunkId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<Embedding>> GetByChunkIdsAsync(string repoId, string? branchName, string model, IReadOnlyList<string> chunkIds, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
         public Task<IEnumerable<Embedding>> GetByBranchAsync(string repoId, string branchName, int limit = 1000, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IEnumerable<(Embedding Embedding, float Distance)>> SearchBySimilarityAsync(float[] queryVector, string? repoId = null, string? branchName = null, int limit = 50, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IEnumerable<(string ChunkId, float Score, float? BM25Score, float? VectorScore)>> HybridSearchAsync(string queryText, float[] queryVector, string? repoId = null, string? branchName = null, float bm25Weight = 0.3f, float vectorWeight = 0.7f, int limit = 50, CancellationToken cancellationToken = default) => throw new NotImplementedException();

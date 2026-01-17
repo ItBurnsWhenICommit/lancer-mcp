@@ -55,3 +55,12 @@ CREATE INDEX IF NOT EXISTS idx_symbol_fingerprints_band2
 
 CREATE INDEX IF NOT EXISTS idx_symbol_fingerprints_band3
     ON symbol_fingerprints(repo_id, branch_name, language, kind, fingerprint_kind, band3);
+
+-- ============================================================================
+-- Embedding Job Indexes
+-- ============================================================================
+CREATE INDEX IF NOT EXISTS idx_embedding_jobs_status_next_attempt
+    ON embedding_jobs(status, next_attempt_at);
+
+CREATE INDEX IF NOT EXISTS idx_embedding_jobs_status_locked_at
+    ON embedding_jobs(status, locked_at);

@@ -73,6 +73,8 @@ CREATE TABLE embeddings (
     generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE embeddings ADD COLUMN IF NOT EXISTS dims INTEGER;
+
 CREATE INDEX idx_embeddings_repo_id ON embeddings(repo_id);
 CREATE INDEX idx_embeddings_repo_branch ON embeddings(repo_id, branch_name);
 CREATE INDEX idx_embeddings_model ON embeddings(model);
@@ -189,4 +191,3 @@ BEGIN
     RAISE NOTICE '  - search_embeddings_cosine()';
     RAISE NOTICE '  - search_embeddings_l2()';
 END $$;
-

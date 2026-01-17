@@ -236,6 +236,34 @@ COMMENT ON COLUMN edges.source_file_path IS 'File where the relationship is defi
 COMMENT ON COLUMN edges.source_line IS 'Line number where the relationship occurs';
 
 -- ============================================================================
+-- Embedding Jobs Table
+-- ============================================================================
+CREATE TABLE embedding_jobs (
+    id TEXT PRIMARY KEY,
+    repo_id TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+    branch_name TEXT NOT NULL,
+    commit_sha TEXT NOT NULL,
+    target_kind TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    model TEXT NOT NULL,
+    dims INTEGER,
+    status TEXT NOT NULL CHECK (status IN ('Pending', 'Processing', 'Completed', 'Blocked')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMPTZ,
+    last_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    locked_at TIMESTAMPTZ,
+    locked_by TEXT,
+    UNIQUE (repo_id, branch_name, target_kind, target_id, model)
+);
+
+COMMENT ON TABLE embedding_jobs IS 'Queues embedding work for code chunks (async, retryable)';
+COMMENT ON COLUMN embedding_jobs.status IS 'Pending, Processing, Completed, Blocked';
+COMMENT ON COLUMN embedding_jobs.next_attempt_at IS 'Next eligible time for retry';
+COMMENT ON COLUMN embedding_jobs.locked_by IS 'Worker identifier holding the job lock';
+
+-- ============================================================================
 -- Verify tables are created
 -- ============================================================================
 DO $$
@@ -247,4 +275,5 @@ BEGIN
     RAISE NOTICE '  - files';
     RAISE NOTICE '  - symbols';
     RAISE NOTICE '  - edges';
+    RAISE NOTICE '  - embedding_jobs';
 END $$;

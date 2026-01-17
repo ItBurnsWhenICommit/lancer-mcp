@@ -34,3 +34,38 @@
 - added banded candidate lookup, Hamming distance ranking, and post-filter terms
 - added snippet lookup by symbol id for compact similarity results
 - include error metadata in compact response payloads
+
+## [phase 4A] schema safety for optional embeddings
+
+- added schema verification test for embedding_jobs, embeddings.dims, and job indexes
+- added embedding_jobs table and performance indexes for job claiming
+- added embeddings.dims column to schema
+- documented embedding_jobs and dims in SCHEMA.md
+
+## [phase 4B] embedding provider abstraction and fallback codes
+
+- added IEmbeddingProvider contract and provider result shape
+- routed QueryOrchestrator through IEmbeddingProvider with stable fallback reasons
+- added fallback tests for disabled/unavailable/missing/invalid query embeddings
+- documented embedding fallback metadata in retrieval profiles
+
+## [phase 4C] embedding job worker and retries
+
+- added embedding job worker with bounded claim/retry/backoff behavior
+- added job error codes and blocked terminal state for max attempts
+- added worker hosted service and job repository blocked update
+- persisted embedding dims on insert/update
+- added worker tests for completion, missing chunks, retries, and max attempts
+
+## [phase 4D] hybrid/semantic rerank over fast candidates
+
+- reranked Hybrid/Semantic results using Fast symbol candidates plus chunk embeddings
+- added candidate cap and stable ordering with Fast tie-breaks
+- added embedding lookup by chunk ids for rerank
+- added rerank tests and updated model resolution scaffolding
+
+## [phase 4E] benchmarks, docs, and cleanup
+
+- documented profile comparison workflow and Phase 4E benchmark results
+- clarified schema notes for embedding dims and job indexes
+- updated retrieval profile semantics for Fast-first rerank

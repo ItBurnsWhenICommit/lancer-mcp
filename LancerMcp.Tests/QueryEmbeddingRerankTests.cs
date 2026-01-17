@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -14,58 +15,10 @@ using Xunit;
 
 namespace LancerMcp.Tests;
 
-public sealed class QueryEmbeddingFallbackTests
+public sealed class QueryEmbeddingRerankTests
 {
     [Fact]
-    public async Task Query_DoesNotGenerateEmbeddings()
-    {
-        var options = new ServerOptions { DefaultRetrievalProfile = RetrievalProfile.Hybrid, EmbeddingsEnabled = true };
-        var provider = new FakeEmbeddingProvider(isAvailable: true);
-        var orchestrator = CreateOrchestrator(options, provider, new FakeEmbeddingRepository("model-a", 2, hasEmbeddings: true));
-
-        await orchestrator.QueryAsync(
-            query: "database connection",
-            repositoryName: "repo",
-            branchName: "main",
-            profileOverride: RetrievalProfile.Hybrid);
-
-        Assert.Equal(0, provider.QueryEmbeddingCalls);
-        Assert.Equal(0, provider.BatchEmbeddingCalls);
-    }
-
-    [Fact]
-    public async Task Hybrid_EmbeddingsDisabled_FallsBackAndMatchesFastOrdering()
-    {
-        var options = new ServerOptions
-        {
-            DefaultRetrievalProfile = RetrievalProfile.Hybrid,
-            EmbeddingsEnabled = false,
-            EmbeddingModel = "model-a"
-        };
-        var provider = new FakeEmbeddingProvider(isAvailable: true);
-        var embeddingRepository = new FakeEmbeddingRepository("model-a", 2, hasEmbeddings: true);
-        var orchestrator = CreateOrchestrator(options, provider, embeddingRepository);
-
-        var hybrid = await orchestrator.QueryAsync(
-            query: "database connection",
-            repositoryName: "repo",
-            branchName: "main",
-            profileOverride: RetrievalProfile.Hybrid);
-
-        var fast = await orchestrator.QueryAsync(
-            query: "database connection",
-            repositoryName: "repo",
-            branchName: "main",
-            profileOverride: RetrievalProfile.Fast);
-
-        Assert.NotEmpty(hybrid.Results);
-        Assert.Equal(EmbeddingFallbackCodes.EmbeddingsDisabled, hybrid.Metadata?["fallback"]);
-        Assert.Equal(false, hybrid.Metadata?["embeddingUsed"]);
-        Assert.Equal(GetResultIds(fast), GetResultIds(hybrid));
-    }
-
-    [Fact]
-    public async Task Hybrid_ProviderUnavailable_FallsBackAndMatchesFastOrdering()
+    public async Task Rerank_ChangesOrdering_WhenEmbeddingsExist()
     {
         var options = new ServerOptions
         {
@@ -73,76 +26,17 @@ public sealed class QueryEmbeddingFallbackTests
             EmbeddingsEnabled = true,
             EmbeddingModel = "model-a"
         };
-        var provider = new FakeEmbeddingProvider(isAvailable: false);
-        var embeddingRepository = new FakeEmbeddingRepository("model-a", 2, hasEmbeddings: true);
-        var orchestrator = CreateOrchestrator(options, provider, embeddingRepository);
-        var queryEmbedding = CreateEmbeddingBase64(2);
-
-        var hybrid = await orchestrator.QueryAsync(
-            query: "database connection",
-            repositoryName: "repo",
-            branchName: "main",
-            profileOverride: RetrievalProfile.Hybrid,
-            queryEmbeddingBase64: queryEmbedding,
-            queryEmbeddingDims: 2,
-            queryEmbeddingModel: "model-a");
-
-        var fast = await orchestrator.QueryAsync(
-            query: "database connection",
-            repositoryName: "repo",
-            branchName: "main",
-            profileOverride: RetrievalProfile.Fast);
-
-        Assert.NotEmpty(hybrid.Results);
-        Assert.Equal(EmbeddingFallbackCodes.ProviderUnavailable, hybrid.Metadata?["fallback"]);
-        Assert.Equal(false, hybrid.Metadata?["embeddingUsed"]);
-        Assert.Equal(GetResultIds(fast), GetResultIds(hybrid));
-    }
-
-    [Fact]
-    public async Task Semantic_MissingQueryEmbedding_FallsBackAndMatchesFastOrdering()
-    {
-        var options = new ServerOptions
-        {
-            DefaultRetrievalProfile = RetrievalProfile.Semantic,
-            EmbeddingsEnabled = true,
-            EmbeddingModel = "model-a"
-        };
-        var provider = new FakeEmbeddingProvider(isAvailable: true);
-        var embeddingRepository = new FakeEmbeddingRepository("model-a", 2, hasEmbeddings: true);
-        var orchestrator = CreateOrchestrator(options, provider, embeddingRepository);
-
-        var semantic = await orchestrator.QueryAsync(
-            query: "database connection",
-            repositoryName: "repo",
-            branchName: "main",
-            profileOverride: RetrievalProfile.Semantic);
-
-        var fast = await orchestrator.QueryAsync(
-            query: "database connection",
-            repositoryName: "repo",
-            branchName: "main",
-            profileOverride: RetrievalProfile.Fast);
-
-        Assert.NotEmpty(semantic.Results);
-        Assert.Equal(EmbeddingFallbackCodes.MissingQueryEmbedding, semantic.Metadata?["fallback"]);
-        Assert.Equal(false, semantic.Metadata?["embeddingUsed"]);
-        Assert.Equal(GetResultIds(fast), GetResultIds(semantic));
-    }
-
-    [Fact]
-    public async Task Hybrid_QueryEmbeddingInvalid_FallsBack()
-    {
-        var options = new ServerOptions
-        {
-            DefaultRetrievalProfile = RetrievalProfile.Hybrid,
-            EmbeddingsEnabled = true,
-            EmbeddingModel = "model-a"
-        };
-        var provider = new FakeEmbeddingProvider(isAvailable: true);
-        var embeddingRepository = new FakeEmbeddingRepository("model-a", 3, hasEmbeddings: true);
-        var orchestrator = CreateOrchestrator(options, provider, embeddingRepository);
-        var queryEmbedding = CreateEmbeddingBase64(2);
+        var queryEmbedding = ToBase64(new[] { 1f, 0f });
+        var embeddingRepository = new FakeEmbeddingRepository(
+            model: "model-a",
+            dims: 2,
+            embeddings: new Dictionary<string, float[]>
+            {
+                ["chunk-a"] = new[] { 0f, 1f },
+                ["chunk-b"] = new[] { 1f, 0f },
+                ["chunk-c"] = new[] { 0f, 0f }
+            });
+        var orchestrator = CreateOrchestrator(options, embeddingRepository, isProviderAvailable: true);
 
         var response = await orchestrator.QueryAsync(
             query: "database connection",
@@ -153,15 +47,51 @@ public sealed class QueryEmbeddingFallbackTests
             queryEmbeddingDims: 2,
             queryEmbeddingModel: "model-a");
 
-        Assert.NotEmpty(response.Results);
-        Assert.Equal(EmbeddingFallbackCodes.QueryEmbeddingInvalid, response.Metadata?["fallback"]);
-        Assert.Equal(false, response.Metadata?["embeddingUsed"]);
+        Assert.Equal(new[] { "symbol-b", "symbol-a", "symbol-c" }, GetResultIds(response));
+        Assert.True(response.Metadata?["embeddingUsed"] is bool used && used);
+        Assert.Contains("rerank:semantic_boost", response.Results.First().Reasons ?? new List<string>());
+    }
+
+    [Fact]
+    public async Task Rerank_FallsBack_WhenEmbeddingsMissing()
+    {
+        var options = new ServerOptions
+        {
+            DefaultRetrievalProfile = RetrievalProfile.Hybrid,
+            EmbeddingsEnabled = true,
+            EmbeddingModel = "model-a"
+        };
+        var queryEmbedding = ToBase64(new[] { 1f, 0f });
+        var embeddingRepository = new FakeEmbeddingRepository(
+            model: "model-a",
+            dims: 2,
+            embeddings: new Dictionary<string, float[]>());
+        var orchestrator = CreateOrchestrator(options, embeddingRepository, isProviderAvailable: true);
+
+        var hybrid = await orchestrator.QueryAsync(
+            query: "database connection",
+            repositoryName: "repo",
+            branchName: "main",
+            profileOverride: RetrievalProfile.Hybrid,
+            queryEmbeddingBase64: queryEmbedding,
+            queryEmbeddingDims: 2,
+            queryEmbeddingModel: "model-a");
+
+        var fast = await orchestrator.QueryAsync(
+            query: "database connection",
+            repositoryName: "repo",
+            branchName: "main",
+            profileOverride: RetrievalProfile.Fast);
+
+        Assert.Equal(GetResultIds(fast), GetResultIds(hybrid));
+        Assert.Equal(EmbeddingFallbackCodes.QueryEmbeddingInvalid, hybrid.Metadata?["fallback"]);
+        Assert.Equal(false, hybrid.Metadata?["embeddingUsed"]);
     }
 
     private static QueryOrchestrator CreateOrchestrator(
         ServerOptions options,
-        IEmbeddingProvider provider,
-        IEmbeddingRepository embeddingRepository)
+        IEmbeddingRepository embeddingRepository,
+        bool isProviderAvailable)
     {
         IOptionsMonitor<ServerOptions> optionsMonitor = new TestOptionsMonitor(options);
 
@@ -173,75 +103,23 @@ public sealed class QueryEmbeddingFallbackTests
             new FakeSymbolSearchRepository(),
             new ThrowingEdgeRepository(),
             new ThrowingSymbolFingerprintRepository(),
-            provider,
+            new FakeEmbeddingProvider(isProviderAvailable),
             optionsMonitor);
     }
 
-    private static string CreateEmbeddingBase64(int dims)
+    private static string ToBase64(float[] vector)
     {
-        var bytes = new byte[dims * 4];
+        var bytes = new byte[vector.Length * 4];
+        for (var i = 0; i < vector.Length; i++)
+        {
+            BinaryPrimitives.WriteSingleLittleEndian(bytes.AsSpan(i * 4, 4), vector[i]);
+        }
+
         return Convert.ToBase64String(bytes);
     }
 
     private static IReadOnlyList<string> GetResultIds(QueryResponse response)
         => response.Results.Select(result => result.Id).ToList();
-
-    private sealed class FakeChunkRepository : ICodeChunkRepository
-    {
-        private static readonly IReadOnlyList<CodeChunk> Chunks = new[]
-        {
-            new CodeChunk
-            {
-                Id = "chunk1",
-                RepositoryName = "repo",
-                BranchName = "main",
-                CommitSha = "sha",
-                FilePath = "src/Db.cs",
-                Language = Language.CSharp,
-                Content = "database connection",
-                StartLine = 1,
-                EndLine = 2,
-                ChunkStartLine = 1,
-                ChunkEndLine = 2
-            },
-            new CodeChunk
-            {
-                Id = "chunk2",
-                RepositoryName = "repo",
-                BranchName = "main",
-                CommitSha = "sha",
-                FilePath = "src/Db2.cs",
-                Language = Language.CSharp,
-                Content = "database connection",
-                StartLine = 3,
-                EndLine = 4,
-                ChunkStartLine = 3,
-                ChunkEndLine = 4
-            }
-        };
-
-        public Task<IEnumerable<CodeChunk>> SearchFullTextAsync(
-            string repoId,
-            string query,
-            string? branchName = null,
-            Language? language = null,
-            int limit = 50,
-            CancellationToken cancellationToken = default)
-            => Task.FromResult<IEnumerable<CodeChunk>>(Chunks);
-
-        public Task<CodeChunk?> GetByIdAsync(string id, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<IEnumerable<CodeChunk>> GetByFileAsync(string repoId, string branchName, string filePath, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<IEnumerable<CodeChunk>> GetBySymbolAsync(string symbolId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<IEnumerable<CodeChunk>> GetByBranchAsync(string repoId, string branchName, int limit = 1000, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<IEnumerable<CodeChunk>> GetByLanguageAsync(string repoId, Language language, int limit = 1000, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<CodeChunk> CreateAsync(CodeChunk chunk, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<int> CreateBatchAsync(IEnumerable<CodeChunk> chunks, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<bool> DeleteAsync(string id, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<int> DeleteByRepoIdAsync(string repoId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<int> DeleteByBranchAsync(string repoId, string branchName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<int> DeleteByFileAsync(string repoId, string branchName, string filePath, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<int> GetCountAsync(string repoId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-    }
 
     private sealed class FakeSymbolSearchRepository : ISymbolSearchRepository
     {
@@ -254,8 +132,9 @@ public sealed class QueryEmbeddingFallbackTests
         {
             return Task.FromResult<IEnumerable<(string, float, string?)>>(new[]
             {
-                ("chunk1", 1.0f, (string?)"database connection"),
-                ("chunk2", 0.9f, (string?)"database connection")
+                ("symbol-a", 1.0f, (string?)"database connection"),
+                ("symbol-b", 0.9f, (string?)"database connection"),
+                ("symbol-c", 0.8f, (string?)"database connection")
             });
         }
 
@@ -274,13 +153,13 @@ public sealed class QueryEmbeddingFallbackTests
         {
             new Symbol
             {
-                Id = "chunk1",
+                Id = "symbol-a",
                 RepositoryName = "repo",
                 BranchName = "main",
                 CommitSha = "sha",
-                FilePath = "src/Db.cs",
-                Name = "Db",
-                QualifiedName = "Db",
+                FilePath = "src/A.cs",
+                Name = "SymbolA",
+                QualifiedName = "SymbolA",
                 Kind = SymbolKind.Class,
                 Language = Language.CSharp,
                 StartLine = 1,
@@ -290,17 +169,33 @@ public sealed class QueryEmbeddingFallbackTests
             },
             new Symbol
             {
-                Id = "chunk2",
+                Id = "symbol-b",
                 RepositoryName = "repo",
                 BranchName = "main",
                 CommitSha = "sha",
-                FilePath = "src/Db2.cs",
-                Name = "Db2",
-                QualifiedName = "Db2",
+                FilePath = "src/B.cs",
+                Name = "SymbolB",
+                QualifiedName = "SymbolB",
                 Kind = SymbolKind.Class,
                 Language = Language.CSharp,
                 StartLine = 3,
                 EndLine = 4,
+                StartColumn = 1,
+                EndColumn = 1
+            },
+            new Symbol
+            {
+                Id = "symbol-c",
+                RepositoryName = "repo",
+                BranchName = "main",
+                CommitSha = "sha",
+                FilePath = "src/C.cs",
+                Name = "SymbolC",
+                QualifiedName = "SymbolC",
+                Kind = SymbolKind.Class,
+                Language = Language.CSharp,
+                StartLine = 5,
+                EndLine = 6,
                 StartColumn = 1,
                 EndColumn = 1
             }
@@ -326,17 +221,102 @@ public sealed class QueryEmbeddingFallbackTests
         public Task<int> DeleteByFileAsync(string repoId, string branchName, string filePath, CancellationToken cancellationToken = default) => throw new NotImplementedException();
     }
 
+    private sealed class FakeChunkRepository : ICodeChunkRepository
+    {
+        private static readonly IReadOnlyList<CodeChunk> Chunks = new[]
+        {
+            new CodeChunk
+            {
+                Id = "chunk-a",
+                RepositoryName = "repo",
+                BranchName = "main",
+                CommitSha = "sha",
+                FilePath = "src/A.cs",
+                SymbolId = "symbol-a",
+                SymbolName = "SymbolA",
+                SymbolKind = SymbolKind.Class,
+                Language = Language.CSharp,
+                Content = "database connection",
+                StartLine = 1,
+                EndLine = 2,
+                ChunkStartLine = 1,
+                ChunkEndLine = 2
+            },
+            new CodeChunk
+            {
+                Id = "chunk-b",
+                RepositoryName = "repo",
+                BranchName = "main",
+                CommitSha = "sha",
+                FilePath = "src/B.cs",
+                SymbolId = "symbol-b",
+                SymbolName = "SymbolB",
+                SymbolKind = SymbolKind.Class,
+                Language = Language.CSharp,
+                Content = "database connection",
+                StartLine = 3,
+                EndLine = 4,
+                ChunkStartLine = 3,
+                ChunkEndLine = 4
+            },
+            new CodeChunk
+            {
+                Id = "chunk-c",
+                RepositoryName = "repo",
+                BranchName = "main",
+                CommitSha = "sha",
+                FilePath = "src/C.cs",
+                SymbolId = "symbol-c",
+                SymbolName = "SymbolC",
+                SymbolKind = SymbolKind.Class,
+                Language = Language.CSharp,
+                Content = "database connection",
+                StartLine = 5,
+                EndLine = 6,
+                ChunkStartLine = 5,
+                ChunkEndLine = 6
+            }
+        };
+
+        public Task<IEnumerable<CodeChunk>> GetBySymbolAsync(string symbolId, CancellationToken cancellationToken = default)
+        {
+            var chunks = Chunks.Where(chunk => string.Equals(chunk.SymbolId, symbolId, StringComparison.Ordinal)).ToList();
+            return Task.FromResult<IEnumerable<CodeChunk>>(chunks);
+        }
+
+        public Task<IEnumerable<CodeChunk>> SearchFullTextAsync(
+            string repoId,
+            string query,
+            string? branchName = null,
+            Language? language = null,
+            int limit = 50,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<IEnumerable<CodeChunk>>(Chunks);
+
+        public Task<CodeChunk?> GetByIdAsync(string id, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IEnumerable<CodeChunk>> GetByFileAsync(string repoId, string branchName, string filePath, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IEnumerable<CodeChunk>> GetByBranchAsync(string repoId, string branchName, int limit = 1000, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IEnumerable<CodeChunk>> GetByLanguageAsync(string repoId, Language language, int limit = 1000, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<CodeChunk> CreateAsync(CodeChunk chunk, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<int> CreateBatchAsync(IEnumerable<CodeChunk> chunks, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<bool> DeleteAsync(string id, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<int> DeleteByRepoIdAsync(string repoId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<int> DeleteByBranchAsync(string repoId, string branchName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<int> DeleteByFileAsync(string repoId, string branchName, string filePath, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<int> GetCountAsync(string repoId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    }
+
     private sealed class FakeEmbeddingRepository : IEmbeddingRepository
     {
         private readonly string _model;
         private readonly int? _dims;
-        private readonly bool _hasEmbeddings;
+        private readonly IReadOnlyDictionary<string, float[]> _embeddings;
 
-        public FakeEmbeddingRepository(string model, int? dims, bool hasEmbeddings)
+        public FakeEmbeddingRepository(string model, int? dims, IReadOnlyDictionary<string, float[]> embeddings)
         {
             _model = model;
             _dims = dims;
-            _hasEmbeddings = hasEmbeddings;
+            _embeddings = embeddings;
         }
 
         public Task<IReadOnlyList<string>> GetModelsAsync(string repoId, string? branchName = null, CancellationToken cancellationToken = default)
@@ -346,12 +326,49 @@ public sealed class QueryEmbeddingFallbackTests
             => Task.FromResult(_dims);
 
         public Task<bool> HasAnyEmbeddingsAsync(string repoId, string? branchName, string model, CancellationToken cancellationToken = default)
-            => Task.FromResult(_hasEmbeddings && string.Equals(model, _model, StringComparison.Ordinal));
+            => Task.FromResult(_embeddings.Count > 0 && string.Equals(model, _model, StringComparison.Ordinal));
+
+        public Task<Embedding?> GetByChunkIdAsync(string chunkId, CancellationToken cancellationToken = default)
+        {
+            if (!_embeddings.TryGetValue(chunkId, out var vector))
+            {
+                return Task.FromResult<Embedding?>(null);
+            }
+
+            return Task.FromResult<Embedding?>(CreateEmbedding(chunkId, vector));
+        }
+
+        public Task<IReadOnlyList<Embedding>> GetByChunkIdsAsync(
+            string repoId,
+            string? branchName,
+            string model,
+            IReadOnlyList<string> chunkIds,
+            CancellationToken cancellationToken = default)
+        {
+            var matches = chunkIds
+                .Where(id => _embeddings.ContainsKey(id))
+                .Select(id => CreateEmbedding(id, _embeddings[id]))
+                .ToList();
+
+            return Task.FromResult<IReadOnlyList<Embedding>>(matches);
+        }
+
+        private static Embedding CreateEmbedding(string chunkId, float[] vector)
+        {
+            return new Embedding
+            {
+                Id = $"embedding-{chunkId}",
+                ChunkId = chunkId,
+                RepositoryName = "repo",
+                BranchName = "main",
+                CommitSha = "sha",
+                Vector = vector,
+                Model = "model-a",
+                GeneratedAt = DateTimeOffset.UtcNow
+            };
+        }
 
         public Task<Embedding?> GetByIdAsync(string id, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<Embedding?> GetByChunkIdAsync(string chunkId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<IReadOnlyList<Embedding>> GetByChunkIdsAsync(string repoId, string? branchName, string model, IReadOnlyList<string> chunkIds, CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<Embedding>>(Array.Empty<Embedding>());
         public Task<IEnumerable<Embedding>> GetByBranchAsync(string repoId, string branchName, int limit = 1000, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IEnumerable<(Embedding Embedding, float Distance)>> SearchBySimilarityAsync(float[] queryVector, string? repoId = null, string? branchName = null, int limit = 50, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IEnumerable<(string ChunkId, float Score, float? BM25Score, float? VectorScore)>> HybridSearchAsync(string queryText, float[] queryVector, string? repoId = null, string? branchName = null, float bm25Weight = 0.3f, float vectorWeight = 0.7f, int limit = 50, CancellationToken cancellationToken = default) => throw new NotImplementedException();
@@ -366,43 +383,18 @@ public sealed class QueryEmbeddingFallbackTests
 
     private sealed class FakeEmbeddingProvider : IEmbeddingProvider
     {
-        private readonly bool _isAvailable;
-
         public FakeEmbeddingProvider(bool isAvailable)
         {
-            _isAvailable = isAvailable;
+            IsAvailable = isAvailable;
         }
 
-        public int QueryEmbeddingCalls { get; private set; }
-        public int BatchEmbeddingCalls { get; private set; }
-
-        public bool IsAvailable => _isAvailable;
+        public bool IsAvailable { get; }
 
         public Task<EmbeddingProviderResult> TryGenerateQueryEmbeddingAsync(string input, CancellationToken cancellationToken)
-        {
-            QueryEmbeddingCalls++;
-            return Task.FromResult(new EmbeddingProviderResult(
-                IsSuccess: false,
-                IsTransientFailure: true,
-                ErrorCode: "provider_unavailable",
-                ErrorMessage: "Embedding provider unavailable.",
-                Dims: null,
-                Vector: null,
-                Embeddings: Array.Empty<Embedding>()));
-        }
+            => throw new NotImplementedException();
 
         public Task<EmbeddingProviderResult> TryGenerateEmbeddingsAsync(IReadOnlyList<CodeChunk> chunks, CancellationToken cancellationToken)
-        {
-            BatchEmbeddingCalls++;
-            return Task.FromResult(new EmbeddingProviderResult(
-                IsSuccess: false,
-                IsTransientFailure: true,
-                ErrorCode: "provider_unavailable",
-                ErrorMessage: "Embedding provider unavailable.",
-                Dims: null,
-                Vector: null,
-                Embeddings: Array.Empty<Embedding>()));
-        }
+            => throw new NotImplementedException();
     }
 
     private sealed class ThrowingEdgeRepository : IEdgeRepository

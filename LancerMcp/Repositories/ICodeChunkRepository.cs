@@ -89,6 +89,16 @@ public interface IEmbeddingRepository
     Task<Embedding?> GetByChunkIdAsync(string chunkId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Gets embeddings for a set of chunk IDs scoped to repo/branch/model.
+    /// </summary>
+    Task<IReadOnlyList<Embedding>> GetByChunkIdsAsync(
+        string repoId,
+        string? branchName,
+        string model,
+        IReadOnlyList<string> chunkIds,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Gets all embeddings for a branch.
     /// </summary>
     Task<IEnumerable<Embedding>> GetByBranchAsync(string repoId, string branchName, int limit = 1000, CancellationToken cancellationToken = default);
