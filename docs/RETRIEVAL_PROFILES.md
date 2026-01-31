@@ -10,13 +10,30 @@
 
 ## Hybrid
 
-- Fast profile plus optional embeddings over code chunks
-- Embeddings used only when available
+- Fast profile plus optional vector rerank over primary chunks for Fast candidates
+- Query embeddings are client-supplied; the server does not generate query embeddings
+- Embeddings used only when available and query embeddings are valid
+- Candidate set: Fast symbol top-N (bounded), map to primary chunk per symbol
+- Rerank uses a sparse/vector blend (default 0.7/0.3) and preserves Fast order for candidates without embeddings
 
 ## Semantic
 
-- Embeddings-first ranking
-- Falls back to Fast when embeddings are unavailable
+- Fast candidates with a heavier vector weight (default 0.3/0.7)
+- Falls back to Hybrid/Fast when embeddings are unavailable or query embeddings are missing/invalid
+
+### Embedding Metadata + Fallbacks
+
+Metadata keys:
+- `embeddingUsed`: boolean, true only when reranking uses embeddings
+- `embeddingModel`: resolved model name when known
+- `fallback`: stable reason code when embeddings are not used
+- `errorCode` / `error`: optional detail for invalid/missing query embeddings
+
+Fallback codes:
+- `embeddings_disabled`: embeddings disabled in config
+- `embedding_provider_unavailable`: provider unavailable or not configured
+- `missing_query_embedding`: query embedding not supplied
+- `query_embedding_invalid`: invalid base64, model missing/ambiguous, or dims mismatch
 
 ## Similarity Operator
 

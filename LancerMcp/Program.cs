@@ -63,6 +63,7 @@ builder.Services.AddSingleton<ISymbolSearchRepository, SymbolSearchRepository>()
 builder.Services.AddSingleton<IEdgeRepository, EdgeRepository>();
 builder.Services.AddSingleton<ICodeChunkRepository, CodeChunkRepository>();
 builder.Services.AddSingleton<IEmbeddingRepository, EmbeddingRepository>();
+builder.Services.AddSingleton<IEmbeddingJobRepository, EmbeddingJobRepository>();
 builder.Services.AddSingleton<ISymbolFingerprintRepository, SymbolFingerprintRepository>();
 
 // Application services
@@ -76,6 +77,7 @@ builder.Services.AddSingleton<QueryOrchestrator>();
 builder.Services.AddSingleton<WorkspaceLoader>();
 builder.Services.AddSingleton<PersistenceService>();
 builder.Services.AddSingleton<EdgeResolutionService>();
+builder.Services.AddSingleton<EmbeddingJobEnqueuer>();
 
 // Configure HttpClient for EmbeddingService with proper BaseAddress and Timeout
 builder.Services.AddHttpClient<EmbeddingService>((serviceProvider, client) =>
@@ -91,9 +93,22 @@ builder.Services.AddHttpClient<EmbeddingService>((serviceProvider, client) =>
     client.Timeout = TimeSpan.FromSeconds(options.CurrentValue.EmbeddingTimeoutSeconds);
 });
 
+builder.Services.AddTransient<IEmbeddingProvider>(serviceProvider =>
+    serviceProvider.GetRequiredService<EmbeddingService>());
+
+builder.Services.AddSingleton(sp => new EmbeddingJobWorker(
+    sp.GetRequiredService<IEmbeddingJobRepository>(),
+    sp.GetRequiredService<ICodeChunkRepository>(),
+    sp.GetRequiredService<IEmbeddingRepository>(),
+    sp.GetRequiredService<IEmbeddingProvider>(),
+    sp.GetRequiredService<IOptionsMonitor<ServerOptions>>(),
+    sp.GetRequiredService<ILogger<EmbeddingJobWorker>>(),
+    $"{Environment.MachineName}:{Environment.ProcessId}"));
+
 builder.Services.AddSingleton<IndexingService>();
 builder.Services.AddHostedService<GitTrackerHostedService>();
 builder.Services.AddHostedService<BranchCleanupHostedService>();
+builder.Services.AddHostedService<EmbeddingJobWorkerHostedService>();
 // ----- End service registration -----
 
 builder.Services

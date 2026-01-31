@@ -63,7 +63,15 @@
 
 ### embeddings
 - `chunk_id`, `repo_id`, `branch_name`, `commit_sha`
-- `vector`, `model`, `model_version`, `generated_at`
+- `vector`, `dims`, `model`, `model_version`, `generated_at`
+- `dims` records vector length for validation; nullable until first embedding write
+
+### embedding_jobs
+- `repo_id`, `branch_name`, `commit_sha`
+- `target_kind`, `target_id`
+- `model`, `dims`, `status`, `attempts`
+- `next_attempt_at`, `last_error`, `locked_at`, `locked_by`
+- Indexes: `(status, next_attempt_at)` for scheduling and `(status, locked_at)` for stale claim recovery
 
 ## Rationale
 
@@ -73,3 +81,4 @@
 - Symbol_fingerprints supports similarity search without embeddings (banded SimHash)
 - Code chunks support sparse retrieval and optional embeddings
 - Embeddings are optional and isolated from baseline retrieval
+- Embedding_jobs tracks async embedding generation without blocking indexing/query

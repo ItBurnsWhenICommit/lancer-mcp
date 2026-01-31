@@ -15,6 +15,14 @@ public sealed class QueryOrchestrator
 {
     private const int SimilarityCandidateLimit = 2000;
     private const int SimilarityTopK = 10;
+    private const int RerankCandidateMin = 50;
+    private const int RerankCandidateMax = 100;
+    private const int RerankCandidateMultiplier = 5;
+    private const float HybridSparseWeight = 0.7f;
+    private const float HybridVectorWeight = 0.3f;
+    private const float SemanticSparseWeight = 0.3f;
+    private const float SemanticVectorWeight = 0.7f;
+    private const string RerankBoostReason = "rerank:semantic_boost";
     private readonly ILogger<QueryOrchestrator> _logger;
     private readonly ICodeChunkRepository _chunkRepository;
     private readonly IEmbeddingRepository _embeddingRepository;
@@ -22,7 +30,7 @@ public sealed class QueryOrchestrator
     private readonly ISymbolSearchRepository _symbolSearchRepository;
     private readonly IEdgeRepository _edgeRepository;
     private readonly ISymbolFingerprintRepository _fingerprintRepository;
-    private readonly EmbeddingService _embeddingService;
+    private readonly IEmbeddingProvider _embeddingProvider;
     private readonly IOptionsMonitor<ServerOptions> _options;
 
     // Intent detection patterns
@@ -99,7 +107,7 @@ public sealed class QueryOrchestrator
         ISymbolSearchRepository symbolSearchRepository,
         IEdgeRepository edgeRepository,
         ISymbolFingerprintRepository fingerprintRepository,
-        EmbeddingService embeddingService,
+        IEmbeddingProvider embeddingProvider,
         IOptionsMonitor<ServerOptions> options)
     {
         _logger = logger;
@@ -109,7 +117,7 @@ public sealed class QueryOrchestrator
         _symbolSearchRepository = symbolSearchRepository;
         _edgeRepository = edgeRepository;
         _fingerprintRepository = fingerprintRepository;
-        _embeddingService = embeddingService;
+        _embeddingProvider = embeddingProvider;
         _options = options;
     }
 
@@ -149,63 +157,81 @@ public sealed class QueryOrchestrator
                 queryEmbeddingModel,
                 maxDims: 4096);
 
+            var embeddingsEnabled = _options.CurrentValue.EmbeddingsEnabled;
+            var providerAvailable = _embeddingProvider.IsAvailable;
+
             string? resolvedEmbeddingModel = null;
             string? embeddingErrorCode = null;
             string? embeddingError = null;
 
-            if (embeddingParse.Success)
+            if (embeddingsEnabled && providerAvailable)
             {
-                if (!string.IsNullOrWhiteSpace(embeddingParse.Model))
+                if (!embeddingParse.Success)
                 {
-                    resolvedEmbeddingModel = embeddingParse.Model;
-                }
-                else if (!string.IsNullOrWhiteSpace(_options.CurrentValue.EmbeddingModel))
-                {
-                    resolvedEmbeddingModel = _options.CurrentValue.EmbeddingModel.Trim().ToLowerInvariant();
+                    embeddingErrorCode = embeddingParse.ErrorCode;
+                    embeddingError = embeddingParse.Error;
                 }
                 else
                 {
-                    var models = await _embeddingRepository.GetModelsAsync(repositoryName, branchName, cancellationToken);
-                    if (models.Count == 1)
+                    if (!string.IsNullOrWhiteSpace(embeddingParse.Model))
                     {
-                        resolvedEmbeddingModel = models[0];
+                        resolvedEmbeddingModel = embeddingParse.Model;
+                    }
+                    else if (!string.IsNullOrWhiteSpace(_options.CurrentValue.EmbeddingModel))
+                    {
+                        resolvedEmbeddingModel = _options.CurrentValue.EmbeddingModel.Trim().ToLowerInvariant();
                     }
                     else
                     {
-                        embeddingErrorCode = "embedding_model_ambiguous";
-                        embeddingError = "Multiple embedding models found; specify queryEmbeddingModel.";
+                        var models = await _embeddingRepository.GetModelsAsync(repositoryName, branchName, cancellationToken);
+                        if (models.Count == 1)
+                        {
+                            resolvedEmbeddingModel = models[0];
+                        }
+                        else
+                        {
+                            embeddingErrorCode = "embedding_model_ambiguous";
+                            embeddingError = "Multiple embedding models found; specify queryEmbeddingModel.";
+                        }
                     }
-                }
 
-                if (resolvedEmbeddingModel != null && embeddingErrorCode == null)
-                {
-                    var hasEmbeddings = await _embeddingRepository.HasAnyEmbeddingsAsync(
-                        repositoryName,
-                        branchName,
-                        resolvedEmbeddingModel,
-                        cancellationToken);
-
-                    if (!hasEmbeddings)
+                    if (resolvedEmbeddingModel != null && embeddingErrorCode == null)
                     {
-                        embeddingErrorCode = "embedding_model_not_found";
-                        embeddingError = $"No embeddings found for model '{resolvedEmbeddingModel}'.";
-                    }
-                    else
-                    {
-                        var modelDims = await _embeddingRepository.GetModelDimsAsync(
+                        var hasEmbeddings = await _embeddingRepository.HasAnyEmbeddingsAsync(
                             repositoryName,
                             branchName,
                             resolvedEmbeddingModel,
                             cancellationToken);
 
-                        if (modelDims.HasValue && embeddingParse.Vector != null && modelDims.Value != embeddingParse.Vector.Length)
+                        if (!hasEmbeddings)
                         {
-                            embeddingErrorCode = "embedding_dims_mismatch";
-                            embeddingError = "Query embedding dims do not match stored embeddings.";
+                            embeddingErrorCode = "embedding_model_not_found";
+                            embeddingError = $"No embeddings found for model '{resolvedEmbeddingModel}'.";
+                        }
+                        else
+                        {
+                            var modelDims = await _embeddingRepository.GetModelDimsAsync(
+                                repositoryName,
+                                branchName,
+                                resolvedEmbeddingModel,
+                                cancellationToken);
+
+                            if (modelDims.HasValue && embeddingParse.Vector != null && modelDims.Value != embeddingParse.Vector.Length)
+                            {
+                                embeddingErrorCode = "embedding_dims_mismatch";
+                                embeddingError = "Query embedding dims do not match stored embeddings.";
+                            }
                         }
                     }
                 }
             }
+
+            var canUseEmbeddings = embeddingsEnabled
+                && providerAvailable
+                && embeddingParse.Success
+                && embeddingErrorCode == null
+                && embeddingParse.Vector != null
+                && !string.IsNullOrWhiteSpace(resolvedEmbeddingModel);
 
             // Step 2: Execute search based on intent
             Dictionary<string, object>? errorMetadata = null;
@@ -219,7 +245,12 @@ public sealed class QueryOrchestrator
             }
             else
             {
-                results = await ExecuteSearchAsync(parsedQuery, cancellationToken);
+                results = await ExecuteSearchAsync(
+                    parsedQuery,
+                    embeddingParse.Vector,
+                    resolvedEmbeddingModel,
+                    canUseEmbeddings,
+                    cancellationToken);
 
                 // Step 3: Re-rank results if needed
                 if (parsedQuery.Intent == QueryIntent.Relations && parsedQuery.IncludeRelated)
@@ -241,25 +272,21 @@ public sealed class QueryOrchestrator
                 ["profile"] = parsedQuery.Profile.ToString()
             };
 
-            metadata["embeddingUsed"] = false;
-            metadata["fallback"] = parsedQuery.Profile switch
+            metadata["embeddingUsed"] = results.Any(r => r.VectorScore.HasValue);
+
+            var fallbackReason = ResolveEmbeddingFallback(parsedQuery.Profile, embeddingsEnabled, providerAvailable, embeddingParse, embeddingErrorCode);
+            if (!string.IsNullOrWhiteSpace(fallbackReason))
             {
-                RetrievalProfile.Semantic => "semantic->hybrid->fast",
-                RetrievalProfile.Hybrid => "hybrid->fast",
-                _ => "fast"
-            };
+                metadata["fallback"] = fallbackReason;
+            }
 
             if (resolvedEmbeddingModel != null)
             {
                 metadata["embeddingModel"] = resolvedEmbeddingModel;
             }
 
-            if (!embeddingParse.Success && parsedQuery.Profile != RetrievalProfile.Fast)
-            {
-                metadata["errorCode"] = embeddingParse.ErrorCode!;
-                metadata["error"] = embeddingParse.Error!;
-            }
-            else if (embeddingErrorCode != null && parsedQuery.Profile != RetrievalProfile.Fast)
+            if (embeddingErrorCode != null &&
+                (fallbackReason == EmbeddingFallbackCodes.MissingQueryEmbedding || fallbackReason == EmbeddingFallbackCodes.QueryEmbeddingInvalid))
             {
                 metadata["errorCode"] = embeddingErrorCode;
                 metadata["error"] = embeddingError ?? string.Empty;
@@ -345,6 +372,43 @@ public sealed class QueryOrchestrator
             SimilarSymbolId = similarSymbolId,
             SimilarTerms = similarTerms
         };
+    }
+
+    private static string? ResolveEmbeddingFallback(
+        RetrievalProfile profile,
+        bool embeddingsEnabled,
+        bool providerAvailable,
+        QueryEmbeddingParseResult embeddingParse,
+        string? embeddingErrorCode)
+    {
+        if (profile == RetrievalProfile.Fast)
+        {
+            return null;
+        }
+
+        if (!embeddingsEnabled)
+        {
+            return EmbeddingFallbackCodes.EmbeddingsDisabled;
+        }
+
+        if (!providerAvailable)
+        {
+            return EmbeddingFallbackCodes.ProviderUnavailable;
+        }
+
+        if (!embeddingParse.Success)
+        {
+            return embeddingParse.ErrorCode == "missing_query_embedding"
+                ? EmbeddingFallbackCodes.MissingQueryEmbedding
+                : EmbeddingFallbackCodes.QueryEmbeddingInvalid;
+        }
+
+        if (embeddingErrorCode != null)
+        {
+            return EmbeddingFallbackCodes.QueryEmbeddingInvalid;
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -677,6 +741,9 @@ public sealed class QueryOrchestrator
     /// </summary>
     private async Task<List<SearchResult>> ExecuteSearchAsync(
         ParsedQuery parsedQuery,
+        float[]? queryEmbedding,
+        string? embeddingModel,
+        bool canUseEmbeddings,
         CancellationToken cancellationToken)
     {
         List<SearchResult> results;
@@ -715,7 +782,7 @@ public sealed class QueryOrchestrator
                 if (!results.Any())
                 {
                     _logger.LogInformation("Navigation search returned 0 results, falling back to hybrid search");
-                    results = await ExecuteHybridSearchAsync(parsedQuery, cancellationToken);
+                    results = await ExecuteHybridSearchAsync(parsedQuery, queryEmbedding, embeddingModel, canUseEmbeddings, cancellationToken);
                 }
                 return results;
 
@@ -726,7 +793,7 @@ public sealed class QueryOrchestrator
                 if (!results.Any())
                 {
                     _logger.LogInformation("Relations search returned 0 results, falling back to hybrid search");
-                    results = await ExecuteHybridSearchAsync(parsedQuery, cancellationToken);
+                    results = await ExecuteHybridSearchAsync(parsedQuery, queryEmbedding, embeddingModel, canUseEmbeddings, cancellationToken);
                 }
                 return results;
 
@@ -734,7 +801,7 @@ public sealed class QueryOrchestrator
             case QueryIntent.Examples:
             case QueryIntent.Search:
             default:
-                return await ExecuteHybridSearchAsync(parsedQuery, cancellationToken);
+                return await ExecuteHybridSearchAsync(parsedQuery, queryEmbedding, embeddingModel, canUseEmbeddings, cancellationToken);
         }
     }
 
@@ -1033,7 +1100,7 @@ public sealed class QueryOrchestrator
                 MaxResults = 5
             };
 
-            var contextResults = await ExecuteHybridSearchAsync(contextParsedQuery, cancellationToken);
+            var contextResults = await ExecuteHybridSearchAsync(contextParsedQuery, null, null, false, cancellationToken);
 
             // Filter out context results that are already in the relation results
             var relationSymbolIds = new HashSet<string>(relationResults.Select(r => r.Id));
@@ -1103,7 +1170,8 @@ public sealed class QueryOrchestrator
     /// </summary>
     private async Task<List<SearchResult>> ExecuteFastSearchAsync(
         ParsedQuery parsedQuery,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int? maxResultsOverride = null)
     {
         var results = new List<SearchResult>();
 
@@ -1113,11 +1181,12 @@ public sealed class QueryOrchestrator
             return results;
         }
 
+        var maxResults = maxResultsOverride ?? parsedQuery.MaxResults;
         var matches = await _symbolSearchRepository.SearchAsync(
             repoId,
             parsedQuery.OriginalQuery,
             parsedQuery.BranchName,
-            parsedQuery.MaxResults * 2,
+            maxResults * 2,
             cancellationToken);
 
         var matchList = matches.ToList();
@@ -1165,6 +1234,11 @@ public sealed class QueryOrchestrator
             results = await ApplyGraphReRankingAsync(results, parsedQuery, cancellationToken);
         }
 
+        if (maxResultsOverride.HasValue && results.Count > maxResults)
+        {
+            return results.Take(maxResults).ToList();
+        }
+
         return results;
     }
 
@@ -1185,14 +1259,195 @@ public sealed class QueryOrchestrator
         return reasons;
     }
 
+    private static int GetRerankCandidateLimit(int maxResults)
+    {
+        var scaled = maxResults * RerankCandidateMultiplier;
+        var withFloor = Math.Max(RerankCandidateMin, scaled);
+        return Math.Min(RerankCandidateMax, withFloor);
+    }
+
+    private async Task<Dictionary<string, string>> ResolvePrimaryChunkIdsAsync(
+        IReadOnlyList<SearchResult> results,
+        CancellationToken cancellationToken)
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var result in results)
+        {
+            if (!string.Equals(result.Type, "symbol", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (map.ContainsKey(result.Id))
+            {
+                continue;
+            }
+
+            var chunks = await _chunkRepository.GetBySymbolAsync(result.Id, cancellationToken);
+            var primaryChunk = chunks
+                .OrderBy(chunk => chunk.ChunkStartLine)
+                .ThenBy(chunk => chunk.Id, StringComparer.Ordinal)
+                .FirstOrDefault();
+
+            if (primaryChunk != null)
+            {
+                map[result.Id] = primaryChunk.Id;
+            }
+        }
+
+        return map;
+    }
+
+    private static float ComputeCosineSimilarity(float[] a, float[] b)
+    {
+        if (a.Length != b.Length)
+        {
+            return 0f;
+        }
+
+        double dot = 0;
+        double normA = 0;
+        double normB = 0;
+
+        for (var i = 0; i < a.Length; i++)
+        {
+            dot += a[i] * b[i];
+            normA += a[i] * a[i];
+            normB += b[i] * b[i];
+        }
+
+        if (normA <= 0 || normB <= 0)
+        {
+            return 0f;
+        }
+
+        return (float)(dot / (Math.Sqrt(normA) * Math.Sqrt(normB)));
+    }
+
+    private static (float SparseWeight, float VectorWeight) GetRerankWeights(RetrievalProfile profile)
+    {
+        return profile == RetrievalProfile.Semantic
+            ? (SemanticSparseWeight, SemanticVectorWeight)
+            : (HybridSparseWeight, HybridVectorWeight);
+    }
+
+    private static List<string>? AppendReason(List<string>? reasons, string reason)
+    {
+        if (reasons == null || reasons.Count == 0)
+        {
+            return new List<string> { reason };
+        }
+
+        if (reasons.Contains(reason, StringComparer.Ordinal))
+        {
+            return reasons;
+        }
+
+        var updated = new List<string>(reasons) { reason };
+        return updated;
+    }
+
+    private static SearchResult CreateRerankedResult(SearchResult result, float vectorScore, RetrievalProfile profile)
+    {
+        var (sparseWeight, vectorWeight) = GetRerankWeights(profile);
+        var combinedScore = (result.Score * sparseWeight) + (vectorScore * vectorWeight);
+
+        return new SearchResult
+        {
+            Id = result.Id,
+            Type = result.Type,
+            Repository = result.Repository,
+            Branch = result.Branch,
+            FilePath = result.FilePath,
+            Language = result.Language,
+            SymbolName = result.SymbolName,
+            QualifiedName = result.QualifiedName,
+            SymbolKind = result.SymbolKind,
+            Content = result.Content,
+            StartLine = result.StartLine,
+            EndLine = result.EndLine,
+            Score = combinedScore,
+            BM25Score = result.BM25Score,
+            VectorScore = vectorScore,
+            GraphScore = result.GraphScore,
+            Signature = result.Signature,
+            Documentation = result.Documentation,
+            RelatedSymbols = result.RelatedSymbols,
+            Reasons = AppendReason(result.Reasons, RerankBoostReason)
+        };
+    }
+
     /// <summary>
     /// Execute hybrid search (BM25 + vector similarity).
     /// </summary>
     private async Task<List<SearchResult>> ExecuteHybridSearchAsync(
         ParsedQuery parsedQuery,
+        float[]? queryEmbedding,
+        string? embeddingModel,
+        bool canUseEmbeddings,
         CancellationToken cancellationToken)
     {
-        return await ExecuteFullTextSearchOnlyAsync(parsedQuery, cancellationToken);
+        var candidateLimit = GetRerankCandidateLimit(parsedQuery.MaxResults);
+        var fastResults = await ExecuteFastSearchAsync(parsedQuery, cancellationToken, candidateLimit);
+        if (fastResults.Count == 0)
+        {
+            return await ExecuteFullTextSearchOnlyAsync(parsedQuery, cancellationToken);
+        }
+
+        if (!canUseEmbeddings || queryEmbedding == null || string.IsNullOrWhiteSpace(embeddingModel))
+        {
+            return fastResults;
+        }
+
+        var symbolToChunk = await ResolvePrimaryChunkIdsAsync(fastResults, cancellationToken);
+        if (symbolToChunk.Count == 0)
+        {
+            return fastResults;
+        }
+
+        var chunkIds = symbolToChunk.Values.Distinct().ToList();
+        var embeddings = await _embeddingRepository.GetByChunkIdsAsync(
+            parsedQuery.RepositoryName!,
+            parsedQuery.BranchName,
+            embeddingModel,
+            chunkIds,
+            cancellationToken);
+
+        if (embeddings.Count == 0)
+        {
+            return fastResults;
+        }
+
+        var embeddingLookup = embeddings.ToDictionary(e => e.ChunkId, e => e, StringComparer.Ordinal);
+        var indexedResults = fastResults.Select((result, index) => (Result: result, Index: index)).ToList();
+        var reranked = new List<(SearchResult Result, int Index)>(indexedResults.Count);
+
+        foreach (var entry in indexedResults)
+        {
+            if (!symbolToChunk.TryGetValue(entry.Result.Id, out var chunkId))
+            {
+                reranked.Add(entry);
+                continue;
+            }
+
+            if (!embeddingLookup.TryGetValue(chunkId, out var embedding))
+            {
+                reranked.Add(entry);
+                continue;
+            }
+
+            var similarity = ComputeCosineSimilarity(queryEmbedding, embedding.Vector);
+            var updated = CreateRerankedResult(entry.Result, similarity, parsedQuery.Profile);
+            reranked.Add((updated, entry.Index));
+        }
+
+        return reranked
+            .OrderByDescending(entry => entry.Result.Score)
+            .ThenBy(entry => entry.Index)
+            .ThenBy(entry => entry.Result.Id, StringComparer.Ordinal)
+            .Select(entry => entry.Result)
+            .ToList();
     }
 
     /// <summary>

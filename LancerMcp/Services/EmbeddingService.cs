@@ -1,3 +1,4 @@
+using System;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
@@ -10,7 +11,7 @@ namespace LancerMcp.Services;
 /// Service for generating embeddings using Text Embeddings Inference (TEI).
 /// Communicates with a TEI Docker container running jina-embeddings-v2-base-code.
 /// </summary>
-public sealed class EmbeddingService : IDisposable
+public sealed class EmbeddingService : IDisposable, IEmbeddingProvider
 {
     private readonly HttpClient _httpClient;
     private readonly IOptionsMonitor<ServerOptions> _options;
@@ -25,6 +26,123 @@ public sealed class EmbeddingService : IDisposable
         _httpClient = httpClient;
         _options = options;
         _logger = logger;
+    }
+
+    public bool IsAvailable => !string.IsNullOrWhiteSpace(_options.CurrentValue.EmbeddingServiceUrl);
+
+    public async Task<EmbeddingProviderResult> TryGenerateQueryEmbeddingAsync(string input, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return new EmbeddingProviderResult(
+                IsSuccess: false,
+                IsTransientFailure: false,
+                ErrorCode: "query_embedding_missing",
+                ErrorMessage: "Query text is required to generate embeddings.",
+                Dims: null,
+                Vector: null,
+                Embeddings: Array.Empty<Embedding>());
+        }
+
+        if (!IsAvailable)
+        {
+            return new EmbeddingProviderResult(
+                IsSuccess: false,
+                IsTransientFailure: true,
+                ErrorCode: "provider_unavailable",
+                ErrorMessage: "Embedding provider unavailable.",
+                Dims: null,
+                Vector: null,
+                Embeddings: Array.Empty<Embedding>());
+        }
+
+        var queryChunk = new CodeChunk
+        {
+            Id = "query",
+            RepositoryName = string.Empty,
+            BranchName = string.Empty,
+            CommitSha = string.Empty,
+            FilePath = string.Empty,
+            Language = Language.Unknown,
+            Content = input,
+            StartLine = 0,
+            EndLine = 0,
+            ChunkStartLine = 0,
+            ChunkEndLine = 0
+        };
+
+        var embeddings = await GenerateEmbeddingsAsync(new[] { queryChunk }, cancellationToken);
+        if (embeddings.Count == 0)
+        {
+            return new EmbeddingProviderResult(
+                IsSuccess: false,
+                IsTransientFailure: true,
+                ErrorCode: "query_embedding_empty",
+                ErrorMessage: "Embedding provider returned no query embeddings.",
+                Dims: null,
+                Vector: null,
+                Embeddings: Array.Empty<Embedding>());
+        }
+
+        var vector = embeddings[0].Vector;
+        return new EmbeddingProviderResult(
+            IsSuccess: true,
+            IsTransientFailure: false,
+            ErrorCode: null,
+            ErrorMessage: null,
+            Dims: vector.Length,
+            Vector: vector,
+            Embeddings: Array.Empty<Embedding>());
+    }
+
+    public async Task<EmbeddingProviderResult> TryGenerateEmbeddingsAsync(IReadOnlyList<CodeChunk> chunks, CancellationToken cancellationToken)
+    {
+        if (chunks.Count == 0)
+        {
+            return new EmbeddingProviderResult(
+                IsSuccess: true,
+                IsTransientFailure: false,
+                ErrorCode: null,
+                ErrorMessage: null,
+                Dims: null,
+                Vector: null,
+                Embeddings: Array.Empty<Embedding>());
+        }
+
+        if (!IsAvailable)
+        {
+            return new EmbeddingProviderResult(
+                IsSuccess: false,
+                IsTransientFailure: true,
+                ErrorCode: "provider_unavailable",
+                ErrorMessage: "Embedding provider unavailable.",
+                Dims: null,
+                Vector: null,
+                Embeddings: Array.Empty<Embedding>());
+        }
+
+        var embeddings = await GenerateEmbeddingsAsync(chunks, cancellationToken);
+        if (embeddings.Count == 0)
+        {
+            return new EmbeddingProviderResult(
+                IsSuccess: false,
+                IsTransientFailure: true,
+                ErrorCode: "embeddings_empty",
+                ErrorMessage: "Embedding provider returned no embeddings.",
+                Dims: null,
+                Vector: null,
+                Embeddings: Array.Empty<Embedding>());
+        }
+
+        var dims = embeddings[0].Vector.Length;
+        return new EmbeddingProviderResult(
+            IsSuccess: true,
+            IsTransientFailure: false,
+            ErrorCode: null,
+            ErrorMessage: null,
+            Dims: dims,
+            Vector: null,
+            Embeddings: embeddings);
     }
 
     /// <summary>
